@@ -121,12 +121,29 @@ class TestIngestGuards:
         assert make_video_id("https://a.com/1") != make_video_id("https://a.com/2")
         assert len(make_video_id("x")) == 12
 
-    def test_license_required(self, tmp_path):
-        """المبدأ 4: ممنوع المعالجة دون تسجيل سند الترخيص."""
+    def test_license_required_mode_blocks(self, tmp_path, monkeypatch):
+        """الوضع الصارم: لا معالجة دون تحديد أساس الاستخدام (المبدأ 4)."""
+        monkeypatch.setenv("ARCLIPPER__INGEST__LICENSE_MODE", "required")
+        settings = load_settings(force=True)
         f = tmp_path / "v.mp4"
         f.write_bytes(b"\x00" * 100)
         with pytest.raises(LicenseError):
-            ingest_local(f, license_note="")
+            ingest_local(f, license_note="", settings=settings)
+        monkeypatch.delenv("ARCLIPPER__INGEST__LICENSE_MODE")
+        load_settings(force=True)
+
+    def test_default_mode_does_not_block(self, tmp_path, monkeypatch):
+        """الوضع المرن: يمرّ بلا إدخال، لكن يفشل لاحقاً لسبب آخر (ملف تالف)
+        — أي أن الترخيص لم يعد هو العائق."""
+        monkeypatch.setenv("ARCLIPPER__INGEST__LICENSE_MODE", "default")
+        settings = load_settings(force=True)
+        f = tmp_path / "v.mp4"
+        f.write_bytes(b"\x00" * 100)
+        with pytest.raises(Exception) as exc:
+            ingest_local(f, license_note="", settings=settings)
+        assert not isinstance(exc.value, LicenseError)
+        monkeypatch.delenv("ARCLIPPER__INGEST__LICENSE_MODE")
+        load_settings(force=True)
 
     def test_missing_file(self, tmp_path):
         from core.common.errors import IngestError

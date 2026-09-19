@@ -17,8 +17,16 @@ ingest:
   max_height: 720
   # صيغة الحاوية المفضّلة بعد الدمج
   container: mp4
-  # إلزام تأكيد الترخيص قبل أي معالجة (المبدأ رقم 4 في الوثيقة)
-  require_license_ack: true
+  # ---- أساس الاستخدام (المبدأ 4 في الوثيقة) ----
+  # الوضع:
+  #   required = لا بد من تمرير --license في كل مرة (الأصرم)
+  #   default  = إن لم تمرّر شيئاً تُستخدم default_license أدناه (الموصى به)
+  #   off      = بلا اشتراط إطلاقاً
+  # في كل الأحوال تُسجَّل القيمة النهائية في metadata.json لكل مقطع.
+  license_mode: default
+  # القيم الجاهزة: campaign | owner_permission | own_content | cc_by |
+  #                fair_use_edu | personal_test
+  default_license: personal_test
 
 transcribe:
   # المحرك: faster_whisper (افتراضي محلي) | whisperx (اختياري إن كان مثبتاً)

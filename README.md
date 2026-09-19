@@ -17,115 +17,138 @@
 
 ---
 
-## ⚡ البدء السريع
+## ⚡ البدء السريع (3 خطوات)
 
-### 1) المتطلبات
-
-- Python 3.10 أو أحدث
-- ffmpeg (مستحسن نظامياً — أو يُثبَّت تلقائياً عبر `imageio-ffmpeg`)
-
-```bash
-# Debian / Ubuntu
-sudo apt install ffmpeg
-# macOS
-brew install ffmpeg
-```
-
-### 2) التثبيت
+### 1) ثبّت
 
 ```bash
 git clone https://github.com/noctis-ops/ar-clipper.git
 cd ar-clipper
-
-python3 -m venv .venv
-source .venv/bin/activate        # Windows: .venv\Scripts\activate
-
+python3 -m venv .venv && source .venv/bin/activate   # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
-
-# للترجمة المحلية للعربية عبر NLLB-200:
-pip install transformers torch sentencepiece
-# أو بديل أخف بكثير (بدون torch):
-pip install argostranslate
 ```
 
-### 3) تأكّد أن البيئة سليمة
+### 2) افحص
 
 ```bash
 python -m cli.main doctor
 ```
 
-يعرض جدولاً بحالة كل مكوّن ويخبرك بالضبط بما ينقص.
+يخبرك **بالضبط** بما ينقص مع أمر التثبيت جاهزاً للنسخ. لا حاجة لتخمين المتطلبات.
 
-### 4) أنتج أول مقطع
+### 3) شغّل
+
+اختر أسلوبك:
 
 ```bash
-python -m cli.main clip "https://www.youtube.com/watch?v=XXXX" \
-    --start 00:12:30 \
-    --end   00:13:20 \
-    --license "إذن كتابي من صاحب القناة بتاريخ 2026-09-18"
+python -m cli.main quickstart    # ⭐ ثلاثة أسئلة وينتج أول مقطع
+python -m cli.main serve         # 🌐 واجهة في المتصفح
 ```
 
-> ⚠️ **الخيار `--license` إلزامي.** هذا تطبيق مباشر للمبدأ الرابع في الوثيقة: لا معالجة لأي فيديو دون رخصة أو إذن واضح، ويُسجَّل السند مع كل مقطع.
+هذا كل شيء. الباقي في هذا الملف تفاصيل لمن يحتاجها.
 
-الناتج في `data/clips/<اسم-الفيديو>/<اسم-المقطع>/`:
+---
 
+## 🖥️ الواجهة الرسومية
+
+```bash
+pip install fastapi "uvicorn[standard]"
+python -m cli.main serve
+# ثم افتح http://127.0.0.1:8000
 ```
-clip.mp4               ← الفيديو النهائي 1080×1920 بترجمة عربية محروقة
-clip.srt / .vtt / .ass ← ملفات الترجمة المرافقة
-clip.transcript.json   ← الترانسكربت الخاص بالمقطع
-clip.metadata.json     ← البيانات الوصفية (المصدر، الترخيص، المحطات المنفَّذة)
-```
+
+ثلاثة حقول: المصدر، المدى، الإعداد — وزر واحد، مع سجل تقدّم حي ومعاينة للفيديو الناتج داخل الصفحة. تعمل محلياً بالكامل، ولا تُرفع أي بيانات لأي خادم.
 
 ---
 
 ## 🛠️ الاستخدام
 
+### المسارات الجاهزة — بدل حفظ عشرة خيارات
+
+```bash
+python -m cli.main presets     # اعرضها كلها
+```
+
+| المسار | متى تستخدمه |
+|---|---|
+| `campaign` | **حملات Whop** — جودة عالية، ترجمة عربية محروقة، 9:16 |
+| `fast` | معاينة سريعة للتجريب |
+| `quality` | المقاطع النهائية المهمة |
+| `arabic_source` | المصدر عربي أصلاً (بلا ترجمة) |
+| `subtitles_only` | ملفات ترجمة فقط للمونتاج في برنامج آخر |
+| `no_subtitles` | قصّ وتأطير فقط — **لا يحمّل أي نموذج** |
+
+```bash
+python -m cli.main clip video.mp4 --preset campaign -s 00:12:30 -e 00:13:20 -L campaign
+```
+
+### أساس الاستخدام (`--license`)
+
+كلمة واحدة بدل جملة:
+
+| القيمة | المعنى | نشر علني |
+|---|---|:---:|
+| `campaign` | مرخّص ضمن حملة clipping (Whop أو مشابه) | ✅ |
+| `owner_permission` | إذن صريح من صاحب المحتوى | ✅ |
+| `own_content` | محتوى من إنتاجك | ✅ |
+| `cc_by` | مشاع إبداعي (مع نسب المصدر) | ✅ |
+| `fair_use_edu` | اقتباس تعليمي/نقدي محدود | ✅ |
+| `personal_test` | شخصي/تجريبي | — |
+
+**لا تريد كتابته أصلاً؟** اضبطه مرة واحدة في `config/settings.yaml`:
+
+```yaml
+ingest:
+  license_mode: default       # required | default | off
+  default_license: campaign
+```
+
+بعدها لن تحتاج `--license` إطلاقاً، وتبقى القيمة مسجَّلة تلقائياً في `metadata.json` لكل مقطع. يمكنك إضافة تفصيل عند الحاجة: `-L "campaign:حملة بودكاست فلان"`.
+
 ### الوضع التفاعلي (لا تعرف التوقيت بعد؟)
 
 ```bash
-python -m cli.main clip video.mp4 --license "ملكي" --interactive
+python -m cli.main clip video.mp4 -p campaign --interactive
 ```
 
-يفرّغ الفيديو، يعرض لك الترانسكربت بالتوقيت (أصلي + عربي)، ثم تختار المدى.
+يفرّغ الفيديو، يعرض الترانسكربت بالتوقيت، ثم تختار المدى.
 
 ### عدة مقاطع في تشغيلة واحدة
 
 ```bash
-python -m cli.main clip video.mp4 --license "ملكي" \
+python -m cli.main clip video.mp4 -p campaign \
     --range 00:01:10..00:01:50 \
-    --range 00:05:00..00:05:45 \
-    --range 00:12:20..00:13:05
+    --range 00:05:00..00:05:45
 ```
 
 التفريغ يحدث **مرة واحدة فقط** ويُعاد استخدامه لكل المقاطع.
 
-### تفريغ وترجمة فقط
+### أوامر أخرى
 
 ```bash
-python -m cli.main transcribe video.mp4 --license "ملكي"
-python -m cli.main show data/transcripts/<الملف>.json
+python -m cli.main transcribe video.mp4     # تفريغ وترجمة فقط
+python -m cli.main show <transcript.json>   # عرض ترانسكربت محفوظ
+python -m cli.main info video.mp4           # معلومات ملف
+python -m cli.main clip --help              # كل الخيارات التفصيلية
 ```
 
-### أوامر مفيدة
+### تجاوز المسار الجاهز
+
+أي علم صريح يتجاوز المسار:
 
 ```bash
-python -m cli.main info video.mp4            # معلومات ملف وسائط
-python -m cli.main clip --help               # كل الخيارات
+python -m cli.main clip video.mp4 -p campaign --model tiny --no-silence -s 10 -e 40
 ```
-
-### خيارات شائعة
 
 | الخيار | الوظيفة |
 |---|---|
-| `--model tiny\|base\|small\|medium\|large-v3` | نموذج التفريغ (الأصغر أسرع) |
-| `--language en` | تحديد لغة المصدر بدل الكشف التلقائي |
-| `--track ar\|source\|bilingual` | نص الترجمة المعروض على الشاشة |
-| `--no-translate` | تعطيل الترجمة (للمحتوى العربي أصلاً) |
-| `--no-silence` | إبقاء فترات الصمت |
-| `--no-reframe` | إبقاء الأبعاد الأصلية |
-| `--no-burn` | توليد ملفات الترجمة دون حرقها |
-| `--fast-cut` | قص أسرع بدون إعادة ترميز |
-| `--keep-temp` | الاحتفاظ بالملفات الوسيطة للتشخيص |
+| `--model tiny\|base\|small\|medium\|large-v3` | نموذج التفريغ |
+| `--language en` | لغة المصدر بدل الكشف التلقائي |
+| `--track ar\|source\|bilingual` | نص الترجمة المعروض |
+| `--no-translate` / `--no-silence` / `--no-reframe` | تعطيل محطة |
+| `--no-burn` | ملفات ترجمة دون حرق |
+| `--fast-cut` | قص أسرع بلا إعادة ترميز |
+| `--keep-temp` | إبقاء الملفات الوسيطة للتشخيص |
 
 ---
 

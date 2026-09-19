@@ -1,7 +1,8 @@
 """محطة الإدخال (Ingest) — تحميل فيديو من رابط أو قبول ملف محلي.
 
 المسؤوليات:
-- التحقق من تأكيد الترخيص قبل أي معالجة (المبدأ 4 — إلزامي).
+- تحديد أساس الاستخدام وتسجيله قبل أي معالجة (المبدأ 4).
+  الاشتراط مرن وقابل للضبط، لكن التسجيل يحدث دائماً.
 - التحميل عبر yt-dlp بجودة محدودة (720p افتراضياً — تكفي للمعالجة).
 - قراءة البيانات الوصفية للملف الناتج.
 - إخراج كائن ``SourceVideo`` موحّد لبقية خط الأنابيب.
@@ -15,11 +16,12 @@ from pathlib import Path
 from typing import Optional
 
 from ..common.config import Settings, load_settings
-from ..common.errors import DependencyError, IngestError, LicenseError
+from ..common.errors import DependencyError, IngestError
 from ..common.ffmpeg import probe
 from ..common.logging_utils import get_logger
 from ..common.schemas import SourceVideo
 from ..common.text_utils import slugify
+from .licensing import resolve as resolve_license
 
 log = get_logger(__name__)
 
@@ -37,15 +39,21 @@ def make_video_id(seed: str) -> str:
 
 
 def _check_license(license_note: str, settings: Settings) -> str:
-    """يفرض تسجيل سند الترخيص إن كان مطلوباً في الإعدادات."""
-    note = (license_note or "").strip()
-    if settings.get("ingest.require_license_ack", True) and not note:
-        raise LicenseError(
-            "مطلوب تسجيل مصدر/سند الترخيص قبل المعالجة (المبدأ 4 في الوثيقة).\n"
-            "مرّر ‎--license \"وصف الإذن أو الرخصة\"‎ أو عطّل الاشتراط عبر "
-            "ingest.require_license_ack=false في config/settings.yaml."
-        )
-    return note or "غير مسجّل (الاشتراط معطّل في الإعدادات)"
+    """يحدّد أساس الاستخدام النهائي حسب وضع الترخيص في الإعدادات.
+
+    الأوضاع: ``required`` | ``default`` | ``off`` — راجع ``core/ingest/licensing.py``.
+    ملاحظة توافق: ``ingest.require_license_ack: false`` القديم ما زال مفهوماً
+    ويُترجم إلى الوضع ``off``.
+    """
+    mode = str(settings.get("ingest.license_mode", "default"))
+    if settings.get("ingest.require_license_ack") is False:
+        mode = "off"  # توافق خلفي مع الإعداد القديم
+
+    return resolve_license(
+        license_note,
+        mode=mode,
+        fallback=str(settings.get("ingest.default_license", "personal_test")),
+    )
 
 
 # ============================================================ ملف محلي

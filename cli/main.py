@@ -32,7 +32,9 @@ from core.common.errors import ArClipperError
 from core.common.logging_utils import setup_logging
 from core.common.schemas import ClipRequest, Transcript
 from core.common.text_utils import human_duration, parse_timestamp
+from core.ingest.licensing import describe_presets
 from core.pipeline import PipelineOptions, run_pipeline, stage_ingest, stage_transcript
+from core.presets import apply_preset_to_settings, get_preset, load_presets
 
 app = typer.Typer(
     name="ar-clipper",
@@ -132,8 +134,14 @@ def clip_command(
     ranges: Optional[List[str]] = typer.Option(
         None, "--range", "-r", help="مدى إضافي بالصيغة: 00:01:10..00:01:50 (يمكن تكراره)."
     ),
+    preset: Optional[str] = typer.Option(
+        None, "--preset", "-p",
+        help="مسار جاهز: campaign|fast|quality|arabic_source|subtitles_only|no_subtitles.",
+    ),
     license_note: str = typer.Option(
-        "", "--license", "-L", help="سند/مصدر الترخيص — إلزامي (المبدأ 4 في الوثيقة)."
+        "", "--license", "-L",
+        help="أساس الاستخدام: campaign|owner_permission|own_content|cc_by|"
+             "fair_use_edu|personal_test (أو نص حر).",
     ),
     name: Optional[str] = typer.Option(None, "--name", "-n", help="اسم مخصص للمقطع."),
     language: Optional[str] = typer.Option(
@@ -167,21 +175,43 @@ def clip_command(
     setup_logging("DEBUG" if verbose else "INFO", force=True)
     settings = load_settings()
 
-    options = PipelineOptions(
-        license_note=license_note,
-        language=language,
-        transcribe_model=model,
-        translate=not no_translate,
-        translate_engine=translate_engine,
-        remove_silence=not no_silence,
-        reframe=not no_reframe,
-        subtitles=not no_subtitles,
-        burn_subtitles=not no_burn,
-        subtitle_track=track,
-        fast_cut=fast_cut,
-        keep_temp=keep_temp,
-        clip_name=name,
-    )
+    # المسار الجاهز يُطبَّق أولاً، ثم تتجاوزه أعلام CLI الصريحة
+    options = PipelineOptions()
+    if preset:
+        try:
+            chosen = get_preset(preset)
+        except ArClipperError as exc:
+            _fail(exc)
+            return
+        apply_preset_to_settings(chosen, settings)
+        for key, value in chosen.options.items():
+            if hasattr(options, key):
+                setattr(options, key, value)
+        console.print(f"[dim]المسار الجاهز: [bold]{chosen.key}[/] — {chosen.label}[/]")
+
+    options.license_note = license_note
+    options.clip_name = name
+    options.keep_temp = keep_temp or options.keep_temp
+    if language is not None:
+        options.language = language
+    if model is not None:
+        options.transcribe_model = model
+    if translate_engine is not None:
+        options.translate_engine = translate_engine
+    if track is not None:
+        options.subtitle_track = track
+    if no_translate:
+        options.translate = False
+    if no_silence:
+        options.remove_silence = False
+    if no_reframe:
+        options.reframe = False
+    if no_subtitles:
+        options.subtitles = False
+    if no_burn:
+        options.burn_subtitles = False
+    if fast_cut:
+        options.fast_cut = True
 
     try:
         requests = _parse_ranges(start, end, ranges)
@@ -225,6 +255,134 @@ def clip_command(
     except KeyboardInterrupt:  # pragma: no cover
         console.print("\n[yellow]أُلغيت العملية بواسطة المستخدم.[/]")
         raise typer.Exit(code=130)
+
+
+# ============================================================ quickstart
+
+
+@app.command(
+    "quickstart",
+    help="⭐ ابدأ من هنا — يسألك 3 أسئلة فقط وينتج أول مقطع.",
+)
+def quickstart_command():
+    """أقصر طريق لأول مقطع ناجح: بلا حفظ أعلام وبلا قراءة توثيق."""
+    setup_logging("INFO", force=True)
+    settings = load_settings()
+
+    console.print(
+        Panel(
+            "سنصنع أول مقطع لك الآن.\n"
+            "ثلاثة أسئلة فقط، وكل سؤال له إجابة افتراضية بين قوسين — "
+            "اضغط Enter لقبولها.",
+            title="[bold cyan]AR-Clipper — البداية السريعة[/]",
+            border_style="cyan",
+        )
+    )
+
+    # --- 1) المصدر
+    source = typer.prompt("\n1) رابط الفيديو أو مسار ملف محلي").strip().strip('"\'')
+    if not source:
+        console.print("[red]لم تُدخل مصدراً.[/]")
+        raise typer.Exit(code=1)
+
+    # --- 2) المدى الزمني
+    console.print("\n2) أي جزء تريد؟  (مثال: 00:12:30 إلى 00:13:20)")
+    start_raw = typer.prompt("   من", default="00:00:00")
+    end_raw = typer.prompt("   إلى", default="00:00:45")
+
+    # --- 3) أساس الاستخدام
+    console.print("\n3) ما أساس استخدامك لهذا الفيديو؟")
+    entries = describe_presets()
+    for i, item in enumerate(entries, start=1):
+        flag = "" if item["publishable"] else "  [yellow](بدون نشر علني)[/]"
+        console.print(f"   {i}) [cyan]{item['key']}[/] — {item['label']}{flag}")
+    choice = typer.prompt("   اختر رقماً", default="1")
+    try:
+        license_key = entries[int(choice) - 1]["key"]
+    except (ValueError, IndexError):
+        license_key = str(choice).strip() or "personal_test"
+
+    # --- التنفيذ بالمسار الموصى به
+    chosen = get_preset("campaign")
+    apply_preset_to_settings(chosen, settings)
+    options = PipelineOptions(license_note=license_key)
+    for key, value in chosen.options.items():
+        if hasattr(options, key):
+            setattr(options, key, value)
+
+    console.print(
+        Panel(
+            f"المصدر: {source}\n"
+            f"المدى: {start_raw} → {end_raw}\n"
+            f"أساس الاستخدام: {license_key}\n"
+            f"المسار: campaign (جودة عالية + ترجمة عربية + 9:16)",
+            title="[bold]سيتم التنفيذ الآن[/]",
+            border_style="green",
+        )
+    )
+    console.print(
+        "[dim]أول تشغيل قد يستغرق دقائق إضافية لتحميل نموذج التفريغ مرة واحدة.[/]\n"
+    )
+
+    try:
+        requests = [
+            ClipRequest(start=parse_timestamp(start_raw), end=parse_timestamp(end_raw))
+        ]
+        results = run_pipeline(
+            source, requests, options=options, settings=settings, progress=_progress
+        )
+    except ArClipperError as exc:
+        _fail(exc)
+        return
+    except ValueError as exc:
+        _fail(ArClipperError(f"صيغة توقيت غير صالحة: {exc}"))
+        return
+
+    console.print()
+    _print_results(results)
+    console.print(
+        Panel(
+            "المقطع جاهز ✅\n\n"
+            "لتكرار نفس النتيجة مباشرةً في المرة القادمة:\n"
+            f"  [cyan]ar-clipper clip \"{source}\" --preset campaign "
+            f"-s {start_raw} -e {end_raw} -L {license_key}[/]",
+            title="[bold green]تم[/]",
+            border_style="green",
+        )
+    )
+
+
+# ============================================================ presets
+
+
+@app.command("presets", help="عرض المسارات الجاهزة وأساسات الاستخدام المتاحة.")
+def presets_command():
+    table = Table(title="المسارات الجاهزة (--preset)", header_style="bold magenta", show_lines=True)
+    table.add_column("المفتاح", style="cyan")
+    table.add_column("الوصف", overflow="fold")
+    for key, preset in load_presets().items():
+        table.add_row(key, f"[bold]{preset.label}[/]\n{preset.description}")
+    console.print(table)
+
+    lic = Table(title="أساسات الاستخدام (--license)", header_style="bold magenta")
+    lic.add_column("المفتاح", style="cyan")
+    lic.add_column("المعنى", overflow="fold")
+    lic.add_column("قابل للنشر", justify="center")
+    for item in describe_presets():
+        lic.add_row(item["key"], item["label"], "✅" if item["publishable"] else "—")
+    console.print(lic)
+
+    console.print(
+        Panel(
+            "أمثلة:\n"
+            "  [cyan]ar-clipper quickstart[/]                                  ← الأسهل للبداية\n"
+            "  [cyan]ar-clipper clip v.mp4 -p campaign -s 60 -e 105[/]         ← حملة clipping\n"
+            "  [cyan]ar-clipper clip v.mp4 -p fast -s 60 -e 105[/]             ← معاينة سريعة\n"
+            "  [cyan]ar-clipper clip v.mp4 -p campaign -i[/]                   ← اختيار المدى تفاعلياً",
+            title="[bold]كيف تستخدمها[/]",
+            border_style="cyan",
+        )
+    )
 
 
 # ============================================================ transcribe
@@ -314,6 +472,41 @@ def info_command(path: Path = typer.Argument(..., help="مسار ملف الفي
     console.print(table)
 
 
+# ============================================================ serve
+
+
+@app.command("serve", help="🌐 تشغيل الواجهة المحلية في المتصفح.")
+def serve_command(
+    host: str = typer.Option("127.0.0.1", "--host", help="عنوان الاستماع."),
+    port: int = typer.Option(8000, "--port", help="المنفذ."),
+):
+    try:
+        import uvicorn  # noqa: F401
+    except ImportError:
+        _fail(
+            ArClipperError(
+                "الواجهة تحتاج حزمتين إضافيتين:\n\n"
+                "    pip install fastapi \"uvicorn[standard]\"\n\n"
+                "أو استخدم الطرفية مباشرةً:  ar-clipper quickstart"
+            )
+        )
+        return
+
+    console.print(
+        Panel(
+            f"الواجهة تعمل على:  [bold cyan]http://{host}:{port}[/]\n\n"
+            "كل المعالجة تجري على جهازك — لا شيء يُرفع لأي خادم خارجي.\n"
+            "[dim]للإيقاف: Ctrl+C[/]",
+            title="[bold green]AR-Clipper — الواجهة المحلية[/]",
+            border_style="green",
+        )
+    )
+
+    import uvicorn
+
+    uvicorn.run("ui.server:app", host=host, port=port, log_level="warning")
+
+
 # ============================================================ doctor
 
 
@@ -400,16 +593,61 @@ def doctor_command():
         table.add_row("settings.yaml", bad, str(exc))
 
     console.print(table)
+
     if problems:
         console.print(
             Panel(
-                f"عدد المشاكل الحرجة: {problems}\nنفّذ: pip install -r requirements.txt",
-                title="[bold red]يلزم إصلاح[/]",
+                "انسخ هذا السطر ونفّذه:\n\n"
+                "    [cyan]pip install -r requirements.txt[/]\n\n"
+                "وإن كان ffmpeg هو الناقص:\n"
+                "    Debian/Ubuntu:  [cyan]sudo apt install ffmpeg[/]\n"
+                "    macOS:          [cyan]brew install ffmpeg[/]\n"
+                "    Windows:        [cyan]winget install Gyan.FFmpeg[/]\n\n"
+                f"عدد المشاكل الحرجة: {problems}",
+                title="[bold red]يلزم إصلاح قبل الاستخدام[/]",
                 border_style="red",
             )
         )
         raise typer.Exit(code=1)
-    console.print("\n[bold green]✅ البيئة جاهزة للمرحلة 1.[/]")
+
+    # اقتراحات اختيارية مفيدة — لا تمنع الاستخدام
+    missing_optional = []
+    try:
+        __import__("transformers")
+    except ImportError:
+        try:
+            __import__("argostranslate")
+        except ImportError:
+            missing_optional.append(
+                "الترجمة للعربية غير مفعّلة بعد:\n"
+                "    خفيف وسريع:  [cyan]pip install argostranslate[/]\n"
+                "    أفضل جودة:   [cyan]pip install transformers torch sentencepiece[/]"
+            )
+    try:
+        __import__("fastapi")
+    except ImportError:
+        missing_optional.append(
+            "الواجهة الرسومية غير مثبّتة:\n"
+            "    [cyan]pip install fastapi \"uvicorn[standard]\"[/]  ثم:  [cyan]ar-clipper serve[/]"
+        )
+
+    if missing_optional:
+        console.print(
+            Panel("\n\n".join(missing_optional), title="[bold yellow]إضافات مقترحة[/]",
+                  border_style="yellow")
+        )
+
+    console.print(
+        Panel(
+            "البيئة جاهزة ✅\n\n"
+            "ابدأ من هنا:\n"
+            "    [cyan]ar-clipper quickstart[/]     ← 3 أسئلة وينتج أول مقطع\n"
+            "    [cyan]ar-clipper serve[/]          ← واجهة في المتصفح\n"
+            "    [cyan]ar-clipper presets[/]        ← المسارات الجاهزة",
+            title="[bold green]جاهز[/]",
+            border_style="green",
+        )
+    )
 
 
 def main() -> None:

@@ -1,0 +1,92 @@
+# ==========================================================
+# مسارات جاهزة (Presets) — "إذا كنت تريد X، استخدم هذا"
+#
+# بدل حفظ عشرة خيارات، اختر مساراً واحداً:
+#     ar-clipper clip video.mp4 --preset fast -s 60 -e 120
+#
+# لعرض كل المسارات:  ar-clipper presets
+# كل مفتاح هنا يقابل حقلاً في PipelineOptions أو تجاوزاً للإعدادات.
+# ==========================================================
+
+campaign:
+  label: "حملة clipping (الموصى به لحملات Whop)"
+  description: "جودة عالية، ترجمة عربية محروقة، 9:16، حذف صمت — جاهز للنشر."
+  options:
+    translate: true
+    remove_silence: true
+    reframe: true
+    subtitles: true
+    burn_subtitles: true
+    subtitle_track: ar
+  settings:
+    transcribe.model: small
+    export.crf: 20
+    export.preset: medium
+
+fast:
+  label: "معاينة سريعة"
+  description: "أسرع ما يمكن لرؤية النتيجة — جودة أقل. مناسب للتجريب."
+  options:
+    translate: false
+    remove_silence: true
+    reframe: true
+    subtitles: true
+    burn_subtitles: true
+    subtitle_track: source
+    fast_cut: true
+  settings:
+    transcribe.model: tiny
+    export.crf: 28
+    export.preset: veryfast
+
+quality:
+  label: "أعلى جودة"
+  description: "أدق تفريغ وأفضل صورة — أبطأ بوضوح. للمقاطع النهائية المهمة."
+  options:
+    translate: true
+    remove_silence: true
+    reframe: true
+    subtitles: true
+    burn_subtitles: true
+    subtitle_track: ar
+  settings:
+    transcribe.model: medium
+    export.crf: 18
+    export.preset: slow
+
+arabic_source:
+  label: "المصدر عربي أصلاً"
+  description: "بدون ترجمة — يفرّغ العربية ويعرضها كما هي."
+  options:
+    translate: false
+    remove_silence: true
+    reframe: true
+    subtitles: true
+    burn_subtitles: true
+    subtitle_track: source
+  settings:
+    transcribe.language: ar
+    transcribe.model: small
+
+subtitles_only:
+  label: "ملفات ترجمة فقط"
+  description: "ينتج SRT/VTT/ASS بدون حرقها — للمونتاج في برنامج آخر."
+  options:
+    translate: true
+    remove_silence: false
+    reframe: true
+    subtitles: true
+    burn_subtitles: false
+    subtitle_track: ar
+
+no_subtitles:
+  label: "قصّ وتأطير فقط"
+  description: "9:16 وحذف صمت بدون أي ترجمة — لا يحمّل أي نموذج، الأسرع إطلاقاً."
+  options:
+    translate: false
+    remove_silence: true
+    reframe: true
+    subtitles: false
+    burn_subtitles: false
+    # لا ترجمة ولا محاذاة ⇒ لا حاجة للتفريغ أصلاً (يُتخطّى تماماً)
+    snap_to_speech: false

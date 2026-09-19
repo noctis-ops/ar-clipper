@@ -1,0 +1,292 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AR-Clipper</title>
+<style>
+  :root{
+    --bg:#0f1218; --panel:#171c26; --panel2:#1e2430; --line:#2a3242;
+    --text:#e8ecf4; --muted:#8b96ab; --accent:#4f9cf9; --accent2:#3b82f6;
+    --ok:#34d399; --warn:#fbbf24; --err:#f87171; --radius:12px;
+  }
+  *{box-sizing:border-box}
+  body{
+    margin:0; background:var(--bg); color:var(--text); min-height:100vh;
+    font-family:"Segoe UI",Tahoma,system-ui,-apple-system,sans-serif;
+    line-height:1.7;
+  }
+  header{
+    padding:26px 20px 20px; text-align:center;
+    border-bottom:1px solid var(--line); background:var(--panel);
+  }
+  header h1{margin:0 0 6px; font-size:26px}
+  header p{margin:0; color:var(--muted); font-size:14px}
+  .wrap{max-width:1000px; margin:0 auto; padding:22px 18px 60px}
+  .grid{display:grid; grid-template-columns:1fr 1fr; gap:18px}
+  @media(max-width:820px){.grid{grid-template-columns:1fr}}
+  .card{
+    background:var(--panel); border:1px solid var(--line);
+    border-radius:var(--radius); padding:18px; margin-bottom:18px;
+  }
+  .card h2{margin:0 0 14px; font-size:16px; display:flex; align-items:center; gap:8px}
+  .step{
+    width:24px; height:24px; border-radius:50%; background:var(--accent);
+    color:#fff; font-size:13px; display:grid; place-items:center; flex:none;
+  }
+  label{display:block; margin:12px 0 6px; font-size:13px; color:var(--muted)}
+  input,select{
+    width:100%; padding:11px 12px; background:var(--panel2); color:var(--text);
+    border:1px solid var(--line); border-radius:9px; font-size:14px;
+    font-family:inherit;
+  }
+  input:focus,select:focus{outline:none; border-color:var(--accent)}
+  .row{display:flex; gap:12px}
+  .row>div{flex:1}
+  button{
+    width:100%; margin-top:18px; padding:14px; font-size:15px; font-weight:600;
+    background:var(--accent2); color:#fff; border:0; border-radius:10px;
+    cursor:pointer; font-family:inherit; transition:.15s;
+  }
+  button:hover:not(:disabled){background:var(--accent)}
+  button:disabled{opacity:.5; cursor:not-allowed}
+  .hint{font-size:12px; color:var(--muted); margin-top:6px}
+  .hint code{background:var(--panel2); padding:2px 6px; border-radius:4px}
+  #log{
+    background:#0b0e14; border:1px solid var(--line); border-radius:9px;
+    padding:12px; height:230px; overflow-y:auto; font-size:13px;
+    font-family:"Cascadia Code",Consolas,monospace; direction:ltr; text-align:left;
+  }
+  .ev{padding:3px 0; border-bottom:1px solid #161b24}
+  .ev.stage{color:var(--accent)}
+  .ev.done{color:var(--ok); font-weight:600}
+  .ev.error{color:var(--err)}
+  .ev.info{color:var(--muted)}
+  .result{
+    background:var(--panel2); border:1px solid var(--line);
+    border-radius:10px; padding:14px; margin-top:12px;
+  }
+  video{width:100%; max-width:290px; border-radius:9px; display:block; margin:10px auto}
+  .meta{display:flex; flex-wrap:wrap; gap:8px; margin-top:10px; justify-content:center}
+  .tag{
+    background:var(--panel); border:1px solid var(--line); color:var(--muted);
+    padding:3px 10px; border-radius:20px; font-size:12px;
+  }
+  .banner{
+    padding:11px 14px; border-radius:9px; font-size:13px; margin-top:12px;
+    display:none;
+  }
+  .banner.err{background:rgba(248,113,113,.12); border:1px solid var(--err); color:#fecaca; display:block}
+  .banner.warn{background:rgba(251,191,36,.12); border:1px solid var(--warn); color:#fde68a; display:block}
+  .cmd{
+    background:#0b0e14; border:1px solid var(--line); border-radius:8px;
+    padding:10px; margin-top:12px; font-family:monospace; font-size:12px;
+    direction:ltr; text-align:left; color:var(--muted); word-break:break-all;
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1>🎬 AR-Clipper</h1>
+  <p>من بودكاست طويل إلى مقطع عمودي مترجم — محلي بالكامل، بلا اشتراكات</p>
+</header>
+
+<div class="wrap">
+  <div class="grid">
+    <!-- ============ الإدخال ============ -->
+    <div>
+      <div class="card">
+        <h2><span class="step">1</span> المصدر</h2>
+        <label>رابط الفيديو أو مسار ملف على جهازك</label>
+        <input id="source" placeholder="https://youtube.com/watch?v=... أو /home/user/video.mp4">
+        <div class="hint" id="srcInfo">الملفات المحلية تُقرأ مباشرة — لا شيء يُرفع لأي خادم.</div>
+      </div>
+
+      <div class="card">
+        <h2><span class="step">2</span> المدى الزمني</h2>
+        <div class="row">
+          <div>
+            <label>من</label>
+            <input id="start" value="00:00:00">
+          </div>
+          <div>
+            <label>إلى</label>
+            <input id="end" value="00:00:45">
+          </div>
+        </div>
+        <div class="hint">الصيغة: <code>00:12:30</code> أو <code>750</code> (ثوانٍ)</div>
+      </div>
+
+      <div class="card">
+        <h2><span class="step">3</span> الإعداد</h2>
+        <label>المسار الجاهز</label>
+        <select id="preset"></select>
+        <div class="hint" id="presetDesc"></div>
+
+        <label>أساس الاستخدام</label>
+        <select id="license"></select>
+        <div class="hint" id="licDesc"></div>
+
+        <button id="go">🚀 أنتج المقطع</button>
+        <div class="banner" id="banner"></div>
+      </div>
+    </div>
+
+    <!-- ============ المخرجات ============ -->
+    <div>
+      <div class="card">
+        <h2>📋 سجل التقدّم</h2>
+        <div id="log"><div class="ev info">بانتظار البدء…</div></div>
+        <div class="hint">أول تشغيل يحمّل نموذج التفريغ مرة واحدة — قد يستغرق دقائق.</div>
+      </div>
+      <div class="card" id="resultCard" style="display:none">
+        <h2>✅ النتيجة</h2>
+        <div id="results"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+let PRESETS = [], LICENSES = [];
+
+async function init(){
+  const r = await fetch('/api/options');
+  const data = await r.json();
+  PRESETS = data.presets; LICENSES = data.licenses;
+
+  $('preset').innerHTML = PRESETS.map(p =>
+    `<option value="${p.key}">${p.label}</option>`).join('');
+  $('license').innerHTML = LICENSES.map(l =>
+    `<option value="${l.key}">${l.label}</option>`).join('');
+
+  const def = data.defaults.default_license;
+  if (LICENSES.some(l => l.key === def)) $('license').value = def;
+
+  updatePreset(); updateLicense();
+}
+
+function updatePreset(){
+  const p = PRESETS.find(x => x.key === $('preset').value);
+  $('presetDesc').textContent = p ? p.description : '';
+}
+function updateLicense(){
+  const l = LICENSES.find(x => x.key === $('license').value);
+  if(!l){ $('licDesc').textContent=''; return; }
+  $('licDesc').innerHTML = l.publishable
+    ? '✅ أساس يسمح بالنشر العلني — سيُسجَّل مع المقطع.'
+    : '⚠️ للاستخدام الشخصي/التجريبي — غير مُعدّ للنشر العلني.';
+}
+
+$('preset').onchange = updatePreset;
+$('license').onchange = updateLicense;
+
+$('source').onblur = async () => {
+  const src = $('source').value.trim();
+  if(!src) return;
+  try{
+    const r = await fetch('/api/probe', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({source: src})
+    });
+    const d = await r.json();
+    if(!r.ok){ $('srcInfo').textContent = '⚠️ ' + (d.detail || 'تعذّرت القراءة'); return; }
+    $('srcInfo').textContent = d.kind === 'local'
+      ? `✅ ${d.width}×${d.height} — المدة ${d.duration_human}`
+      : 'رابط — ستُقرأ التفاصيل عند التحميل.';
+    if(d.kind === 'local' && d.duration && $('end').value === '00:00:45'){
+      const cap = Math.min(45, Math.floor(d.duration));
+      $('end').value = new Date(cap*1000).toISOString().substr(11,8);
+    }
+  }catch(e){ /* تجاهُل صامت */ }
+};
+
+function logEvent(kind, msg){
+  const box = $('log');
+  const el = document.createElement('div');
+  el.className = 'ev ' + kind;
+  const t = new Date().toLocaleTimeString('en-GB');
+  el.textContent = `[${t}] ${msg}`;
+  box.appendChild(el); box.scrollTop = box.scrollHeight;
+}
+
+function showBanner(type, msg){
+  const b = $('banner');
+  b.className = 'banner ' + type;
+  b.textContent = msg;
+}
+
+$('go').onclick = async () => {
+  const source = $('source').value.trim();
+  if(!source){ showBanner('err', 'حدّد رابطاً أو مسار ملف أولاً.'); return; }
+
+  $('go').disabled = true;
+  $('banner').className = 'banner';
+  $('log').innerHTML = '';
+  $('resultCard').style.display = 'none';
+  logEvent('info', 'إرسال المهمة…');
+
+  const payload = {
+    source,
+    start: $('start').value.trim(),
+    end: $('end').value.trim(),
+    preset: $('preset').value,
+    license_key: $('license').value
+  };
+
+  try{
+    const r = await fetch('/api/clip', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify(payload)
+    });
+    const d = await r.json();
+    if(!r.ok) throw new Error(d.detail || 'فشل بدء المهمة');
+    follow(d.job_id, payload);
+  }catch(e){
+    logEvent('error', e.message);
+    showBanner('err', e.message);
+    $('go').disabled = false;
+  }
+};
+
+function follow(jobId, payload){
+  const es = new EventSource(`/api/jobs/${jobId}/stream`);
+  es.onmessage = ev => {
+    const d = JSON.parse(ev.data);
+    logEvent(d.kind, d.message);
+    if(d.kind === 'done'){ es.close(); finish(jobId, payload); }
+    if(d.kind === 'error'){
+      es.close(); showBanner('err', d.message); $('go').disabled = false;
+    }
+  };
+  es.onerror = () => { es.close(); $('go').disabled = false; };
+}
+
+async function finish(jobId, payload){
+  const r = await fetch(`/api/jobs/${jobId}`);
+  const d = await r.json();
+  $('go').disabled = false;
+  if(!d.results.length) return;
+
+  $('results').innerHTML = d.results.map(res => `
+    <div class="result">
+      <video controls src="/api/file?path=${encodeURIComponent(res.video_path)}"></video>
+      <div class="meta">
+        <span class="tag">${res.width}×${res.height}</span>
+        <span class="tag">${res.duration_human}</span>
+        ${Object.keys(res.subtitles).map(f=>`<span class="tag">.${f}</span>`).join('')}
+      </div>
+      <div class="cmd">${res.video_path}</div>
+    </div>
+  `).join('') + `
+    <div class="cmd">💡 نفس النتيجة من الطرفية:<br>
+ar-clipper clip "${payload.source}" --preset ${payload.preset} \\
+  -s ${payload.start} -e ${payload.end} -L ${payload.license_key}</div>`;
+  $('resultCard').style.display = 'block';
+}
+
+init();
+</script>
+</body>
+</html>

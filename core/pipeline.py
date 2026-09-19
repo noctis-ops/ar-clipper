@@ -296,12 +296,21 @@ def run_pipeline(
     ctx.workspace = suggest_workspace_name(ctx.source)
 
     # 2) التفريغ + الترجمة
+    # التفريغ أبطأ محطة بفارق كبير، ويحتاج تحميل نموذج. لا نشغّله إطلاقاً
+    # إن كان الناتج لن يُستخدم (لا ترجمة مرئية ولا محاذاة مع الكلام).
+    needs_transcript = bool(
+        options.subtitles and settings.get("subtitles.enabled", True)
+    ) or options.snap_to_speech
+
     if transcript is not None:
         ctx.transcript = transcript
-    else:
+    elif needs_transcript:
         ctx.transcript, ctx.transcript_path = stage_transcript(
             ctx.source, options, settings, progress
         )
+    else:
+        log.info("لا حاجة للتفريغ في هذا المسار — تم تخطّيه لتوفير الوقت.")
+        ctx.transcript = None
 
     # 3) إنتاج كل مقطع
     results: List[ClipResult] = []
