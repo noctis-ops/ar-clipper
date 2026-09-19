@@ -1,0 +1,97 @@
+# ==========================================================
+# AR-Clipper — الإعدادات العامة (Single source of runtime config)
+# كل قيمة هنا يمكن تجاوزها عبر متغير بيئة بالصيغة: ARCLIPPER__<SECTION>__<KEY>
+# مثال:  ARCLIPPER__TRANSCRIBE__MODEL=small
+# ==========================================================
+
+paths:
+  data_dir: data
+  raw_videos: data/raw_videos
+  transcripts: data/transcripts
+  clips: data/clips
+  registry: data/registry
+  tmp: data/tmp
+
+ingest:
+  # جودة التحميل القصوى (المرحلة 1: 720p تكفي للمعالجة)
+  max_height: 720
+  # صيغة الحاوية المفضّلة بعد الدمج
+  container: mp4
+  # إلزام تأكيد الترخيص قبل أي معالجة (المبدأ رقم 4 في الوثيقة)
+  require_license_ack: true
+
+transcribe:
+  # المحرك: faster_whisper (افتراضي محلي) | whisperx (اختياري إن كان مثبتاً)
+  engine: faster_whisper
+  # tiny | base | small | medium | large-v3  → الأصغر أسرع على CPU
+  model: small
+  device: auto          # auto | cpu | cuda
+  compute_type: auto    # auto | int8 | int8_float16 | float16 | float32
+  language: null        # null = كشف تلقائي للغة
+  beam_size: 5
+  vad_filter: true
+  word_timestamps: true
+
+translate:
+  # nllb (افتراضي محلي) | argos | passthrough (بدون ترجمة، للاختبار)
+  engine: nllb
+  target_lang: ar
+  nllb_model: facebook/nllb-200-distilled-600M
+  batch_size: 8
+  max_chars_per_request: 400
+
+silence:
+  enabled: true
+  # ffmpeg (افتراضي، بدون تبعيات إضافية) | auto_editor (إن كان مثبتاً)
+  engine: ffmpeg
+  threshold_db: -34.0     # ما دون هذه الشدة يُعتبر صمتاً
+  min_silence_ms: 700     # أقصر فترة صمت تُحذف
+  keep_padding_ms: 120    # هامش أمان يُترك حول الكلام حتى لا تُقطع الحروف
+
+reframe:
+  enabled: true
+  aspect: "9:16"
+  # center (المرحلة 1) | face_track (المرحلة 3)
+  mode: center
+  width: 1080
+  height: 1920
+  # 0.0 = يسار/أعلى، 0.5 = المنتصف، 1.0 = يمين/أسفل
+  focus_x: 0.5
+  focus_y: 0.5
+
+subtitles:
+  enabled: true
+  burn: true
+  # النص الذي يُحرق على الفيديو: ar | source | bilingual
+  track: ar
+  font_name: DejaVu Sans
+  font_size: 54
+  primary_color: "#FFFFFF"
+  outline_color: "#000000"
+  back_color: "#A0000000"
+  outline: 3
+  shadow: 1
+  bold: true
+  margin_v: 180
+  # عدد الأحرف الأقصى للسطر الواحد قبل اللف
+  max_line_chars: 38
+  max_lines: 2
+  rtl: true
+
+export:
+  video_codec: libx264
+  audio_codec: aac
+  crf: 20
+  preset: medium
+  audio_bitrate: 160k
+  fps: 30
+  # صيغ ملفات الترجمة التي تُحفظ بجانب الفيديو
+  sidecar_formats: [srt, vtt, ass]
+
+runtime:
+  # مسار ffmpeg/ffprobe — اتركه null للكشف التلقائي (PATH ثم imageio-ffmpeg)
+  ffmpeg_path: null
+  ffprobe_path: null
+  # حذف الملفات الوسيطة بعد نجاح المعالجة (القسم 14 من الوثيقة)
+  cleanup_temp: true
+  log_level: INFO

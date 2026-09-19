@@ -1,0 +1,49 @@
+# ==========================================================
+# AR-Clipper — تبعيات المرحلة 1
+# كل ما هنا مجاني ومفتوح المصدر ويعمل محلياً (المبدأ 1 و 2).
+# التثبيت:  pip install -r requirements.txt
+# ==========================================================
+
+# ---------- الأساس (إلزامي) ----------
+typer>=0.12.0                 # واجهة سطر الأوامر
+rich>=13.0.0                  # عرض جداول وألوان في الطرفية
+PyYAML>=6.0                   # قراءة config/settings.yaml
+yt-dlp>=2024.1.1              # تحميل الفيديو من الروابط
+imageio-ffmpeg>=0.4.9         # نسخة ffmpeg ثابتة تعمل بلا صلاحيات root (احتياطي)
+
+# ---------- التفريغ الصوتي ----------
+faster-whisper>=1.0.0         # المحرك الافتراضي (CTranslate2) — أسرع بعدة أضعاف
+
+# ---------- الترجمة المرئية ----------
+pysubs2>=1.6.0                # بناء ملفات ASS (يُستخدم بعمق في المرحلة 3)
+
+# ---------- الاختبارات ----------
+pytest>=8.0.0
+
+# ==========================================================
+# اختياري — ثبّته حسب حاجتك
+# ==========================================================
+#
+# الترجمة المحلية للعربية عبر NLLB-200 (الافتراضي في settings.yaml):
+#   pip install transformers torch sentencepiece sacremoses
+#
+# بديل ترجمة أخف بكثير (بدون GPU، بدون torch):
+#   pip install argostranslate
+#   ثم فعّله:  translate.engine: argos   في config/settings.yaml
+#
+# محرك حذف صمت بديل ومخصص:
+#   pip install auto-editor
+#   ثم فعّله:  silence.engine: auto_editor
+#
+# محرك تفريغ بديل مع محاذاة أدق على مستوى الكلمة:
+#   pip install whisperx
+#   ثم فعّله:  transcribe.engine: whisperx
+#
+# ملاحظة: ffmpeg النظامي أفضل من imageio-ffmpeg (يشمل ffprobe):
+#   Debian/Ubuntu:  sudo apt install ffmpeg
+#   macOS:          brew install ffmpeg
+#   Windows:        winget install Gyan.FFmpeg
+#
+# خطوط عربية أفضل للترجمة المحروقة (اختياري لكن مستحسن):
+#   sudo apt install fonts-noto-core fonts-kacst
+#   ثم غيّر subtitles.font_name في الإعدادات

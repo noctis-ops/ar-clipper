@@ -1,0 +1,62 @@
+# ---------- Python ----------
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+dist/
+*.egg-info/
+.eggs/
+.venv/
+venv/
+env/
+ENV/
+
+# ---------- أدوات الاختبار والفحص ----------
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+coverage.xml
+
+# ---------- بيانات المشروع (لا تُرفع إلى Git — ملفات ضخمة) ----------
+data/raw_videos/*
+data/transcripts/*
+data/clips/*
+data/registry/*
+data/tmp/*
+!data/**/.gitkeep
+*.mp4
+*.mkv
+*.webm
+*.mov
+*.avi
+*.wav
+*.mp3
+*.m4a
+*.sqlite3
+*.db
+
+# ---------- نماذج الذكاء الاصطناعي (تُحمّل تلقائياً عند أول تشغيل) ----------
+models/
+*.bin
+*.pt
+*.onnx
+*.ckpt
+*.safetensors
+
+# ---------- إعدادات محلية وأسرار ----------
+config/settings.local.yaml
+.env
+.env.*
+*.key
+
+# ---------- نظام التشغيل والمحرر ----------
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*~
