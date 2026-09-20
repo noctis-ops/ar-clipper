@@ -139,10 +139,10 @@ python -m cli.main clip "https://youtube.com/watch?v=XXXX" \
 | `test_licensing.py` | 24 | ✅ | لا |
 | `test_web_api.py` | 20 | ✅ | لا |
 | `test_pipeline_integration.py` | 25 | ✅ | **نعم** (`-m slow`) |
-| `test_analyze.py` *(م2)* | 35 | ✅ | لا |
+| `test_analyze.py` *(م2)* | 40 | ✅ | لا |
 | `test_content_safety.py` *(م2)* | 23 | ✅ | لا |
 | `test_suggest.py` *(م2)* | 19 | ✅ | لا |
-| **الإجمالي** | **295** | ✅ | — |
+| **الإجمالي** | **300** | ✅ | — |
 
 ```bash
 pytest                 # كل الاختبارات
@@ -283,7 +283,7 @@ Ingest → Transcribe → Translate → [Diarize] → Analyze → Content Gen �
 | يعمل بلا نموذج مثبَّت | ✅ تراجع استدلالي مُختبَر (`test_llm_failure_falls_back_to_heuristic`) |
 | الإنتاج المباشر من المقترحات | ✅ `--produce` أو `--pick 0,2` |
 | لا تداخل زمني بين المقترحات | ✅ مُختبَر |
-| لا كسر للمرحلة 1 | ✅ 295 اختباراً + `e2e_check.py` 14/14 |
+| لا كسر للمرحلة 1 | ✅ 300 اختباراً + `e2e_check.py` 14/14 |
 
 ### 3.6 الدَّين التقني الجديد
 
@@ -405,4 +405,5 @@ Ingest → Transcribe → Translate → [Diarize] → Analyze → Content Gen �
 | 2026-09-20 | إصلاح `extract_json`: كان يقتطع مصفوفة داخلية بدل الكائن الكامل | ✅ |
 | 2026-09-20 | إصلاح `slugify`: الترقيم العربي كان يتسرّب لأسماء الملفات | ✅ |
 | 2026-09-20 | الواجهة: وضع "اقترح لي" + اختيار المقاطع وإنتاجها (`/api/suggest` و `/api/produce`) | ✅ |
-| 2026-09-20 | الاختبارات 210 → 295 | ✅ |
+| 2026-09-20 | إصلاح: مخرجات النموذج كانت قد تُنتج مقاطع متداخلة (تكرار نفس الكلام) | ✅ |
+| 2026-09-20 | الاختبارات 210 → 300 | ✅ |

@@ -110,6 +110,26 @@ def _discover_prompt(window: str, max_moments: int) -> str:
 # ============================================================ الأوضاع
 
 
+def _drop_overlaps(
+    moments: List[MomentCandidate], *, max_moments: int
+) -> List[MomentCandidate]:
+    """يزيل التداخل الزمني مع إبقاء الأعلى درجةً.
+
+    النموذج قد يقترح مقاطع متداخلة (أو يفسد المدى بإزاحات كبيرة)، وهذا يعني
+    تكرار نفس الكلام في أكثر من مقطع. الاستدلال يمنع هذا أصلاً، فنفرض الضمان
+    نفسه على مخرجات النموذج.
+    """
+    kept: List[MomentCandidate] = []
+    for m in sorted(moments, key=lambda x: (-x.score, x.start)):
+        if len(kept) >= max_moments:
+            break
+        if any(m.start < k.end and m.end > k.start for k in kept):
+            continue
+        kept.append(m)
+    kept.sort(key=lambda x: x.start)
+    return kept
+
+
 def _analyze_llm_only(
     transcript: Transcript, llm: BaseLLM, max_moments: int, min_dur: float, max_dur: float
 ) -> List[MomentCandidate]:
@@ -153,7 +173,7 @@ def _analyze_llm_only(
                 speaker=sub.segments[0].speaker if sub.segments else None,
             )
         )
-    return out[:max_moments]
+    return _drop_overlaps(out, max_moments=max_moments)
 
 
 def _analyze_hybrid(
@@ -216,7 +236,9 @@ def _analyze_hybrid(
             )
         )
 
-    return picked[:max_moments] if picked else pool[:max_moments]
+    if not picked:
+        return pool[:max_moments]
+    return _drop_overlaps(picked, max_moments=max_moments)
 
 
 # ============================================================ الواجهة العامة

@@ -5,6 +5,8 @@
 
 from __future__ import annotations
 
+import json
+
 import pytest
 
 from core.analyze.heuristics import (
@@ -315,3 +317,88 @@ class TestAnalyzeTranscript:
         moments = analyze_transcript(self._tr(), settings=settings, engine="heuristic")
         assert all(m.reason for m in moments)
         assert any(m.text for m in moments)
+
+
+# ============================================================ مسار النموذج
+
+
+class TestLLMPathsNoOverlap:
+    """النموذج قد يقترح مقاطع متداخلة — الضمان مفروض على مخرجاته أيضاً."""
+
+    def _transcript(self):
+        return make_transcript(
+            [
+                (f"The secret number {i} is that nobody tells you this fact.", f"سر رقم {i}")
+                for i in range(10)
+            ]
+        )
+
+    def test_hybrid_drops_overlapping_llm_output(self):
+        from core.analyze.moments import _analyze_hybrid
+
+        llm = FakeLLM(
+            json.dumps(
+                [
+                    {"index": 0, "score": 9, "kind": "insight", "reason": "أ",
+                     "trim_start_offset": 0, "trim_end_offset": 40},
+                    {"index": 1, "score": 8, "kind": "insight", "reason": "ب",
+                     "trim_start_offset": -40, "trim_end_offset": 0},
+                ]
+            )
+        )
+        out = _analyze_hybrid(self._transcript(), llm, max_moments=5, min_dur=15.0, max_dur=60.0)
+        for a, b in zip(out, out[1:]):
+            assert a.end <= b.start + 1e-6
+
+    def test_hybrid_keeps_highest_score_on_conflict(self):
+        from core.analyze.moments import _analyze_hybrid
+
+        llm = FakeLLM(
+            json.dumps(
+                [
+                    {"index": 0, "score": 9, "kind": "insight", "reason": "الأعلى",
+                     "trim_start_offset": 0, "trim_end_offset": 40},
+                    {"index": 1, "score": 2, "kind": "insight", "reason": "الأدنى",
+                     "trim_start_offset": -40, "trim_end_offset": 0},
+                ]
+            )
+        )
+        out = _analyze_hybrid(self._transcript(), llm, max_moments=5, min_dur=15.0, max_dur=60.0)
+        assert out[0].score == 9.0
+
+    def test_llm_only_drops_overlaps(self):
+        from core.analyze.moments import _analyze_llm_only
+
+        llm = FakeLLM(
+            json.dumps(
+                [
+                    {"start": 0, "end": 40, "score": 9, "kind": "story", "reason": "أ"},
+                    {"start": 20, "end": 55, "score": 5, "kind": "story", "reason": "ب"},
+                ]
+            )
+        )
+        out = _analyze_llm_only(self._transcript(), llm, max_moments=5, min_dur=15.0, max_dur=60.0)
+        for a, b in zip(out, out[1:]):
+            assert a.end <= b.start + 1e-6
+
+    def test_hybrid_ignores_bad_indices(self):
+        from core.analyze.moments import _analyze_hybrid
+
+        llm = FakeLLM(json.dumps([{"index": 999, "score": 9, "kind": "x", "reason": "y"}]))
+        out = _analyze_hybrid(self._transcript(), llm, max_moments=3, min_dur=15.0, max_dur=60.0)
+        assert out, "فهرس خاطئ يجب أن يتراجع لمرشحات الاستدلال لا أن يُفرغ النتيجة"
+
+    def test_llm_only_skips_invalid_ranges(self):
+        from core.analyze.moments import _analyze_llm_only
+
+        llm = FakeLLM(
+            json.dumps(
+                [
+                    {"start": 50, "end": 10, "score": 9, "kind": "x", "reason": "معكوس"},
+                    {"start": 0, "end": 30, "score": 7, "kind": "story", "reason": "سليم"},
+                ]
+            )
+        )
+        out = _analyze_llm_only(self._transcript(), llm, max_moments=5, min_dur=15.0, max_dur=60.0)
+        assert len(out) == 1
+        assert out[0].start == pytest.approx(0.0)
