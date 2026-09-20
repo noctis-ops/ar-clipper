@@ -223,8 +223,14 @@ def burn_subtitles(
     *,
     settings: Optional[Settings] = None,
     fonts_dir: Optional[str | Path] = None,
+    extra_video_filter: str = "",
+    audio_filter: str = "",
 ) -> Path:
-    """يحرق ملف ASS على الفيديو عبر فلتر ``ass`` في ffmpeg."""
+    """يحرق ملف ASS على الفيديو عبر فلتر ``ass`` في ffmpeg.
+
+    ``extra_video_filter``/``audio_filter`` يسمحان بدمج لمسات أخرى (مثل
+    الظهور/الاختفاء الناعم) في **نفس** التمريرة بدل دورة ترميز إضافية.
+    """
     settings = settings or load_settings()
     ass_file = Path(ass_path)
     if not ass_file.exists():
@@ -233,12 +239,15 @@ def burn_subtitles(
     vf = f"ass='{escape_filter_path(ass_file)}'"
     if fonts_dir:
         vf += f":fontsdir='{escape_filter_path(fonts_dir)}'"
+    if extra_video_filter:
+        vf = f"{vf},{extra_video_filter}"
 
     log.info("حرق الترجمة على الفيديو...")
     return apply_filters(
         video_path,
         output_path,
         video_filter=vf,
+        audio_filter=audio_filter,
         crf=int(settings.get("export.crf", 20)),
         preset=str(settings.get("export.preset", "medium")),
         video_codec=str(settings.get("export.video_codec", "libx264")),

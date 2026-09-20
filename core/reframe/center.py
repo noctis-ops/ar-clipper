@@ -96,8 +96,14 @@ def reframe(
     height: Optional[int] = None,
     focus_x: Optional[float] = None,
     focus_y: Optional[float] = None,
+    extra_video_filter: str = "",
+    extra_audio_filter: str = "",
 ) -> Path:
-    """يحوّل الفيديو إلى المقاس العمودي المطلوب."""
+    """يحوّل الفيديو إلى المقاس العمودي المطلوب.
+
+    ``extra_*`` تُدمج في نفس التمريرة — تُستخدم عندما لا تكون هناك محطة حرق
+    لاحقة تحمل اللمسات النهائية.
+    """
     settings = settings or load_settings()
     src = Path(source_path)
     if not src.exists():
@@ -128,10 +134,29 @@ def reframe(
         "إعادة التأطير: %dx%d → %dx%d (قص مركزي)", info.width, info.height, out_w, out_h
     )
 
+    # تطبيع الصوت يُدمج هنا مجاناً: هذه التمريرة تعيد ترميز الصوت أصلاً،
+    # فإضافة loudnorm إليها لا تكلّف دورة ترميز إضافية (المبدأ: أقل تمريرات).
+    af = ""
+    if settings.get("polish.enabled", True) and settings.get(
+        "polish.normalize_audio", True
+    ):
+        af = (
+            f"loudnorm=I={float(settings.get('polish.loudness_target', -16.0))}"
+            f":TP={float(settings.get('polish.true_peak', -1.5))}"
+            f":LRA={float(settings.get('polish.loudness_range', 11.0))}"
+        )
+        log.info("تطبيع جهارة الصوت مدمج في هذه التمريرة (EBU R128).")
+
+    if extra_video_filter:
+        vf = f"{vf},{extra_video_filter}"
+    if extra_audio_filter:
+        af = f"{af},{extra_audio_filter}" if af else extra_audio_filter
+
     return apply_filters(
         src,
         output_path,
         video_filter=vf,
+        audio_filter=af,
         crf=int(settings.get("export.crf", 20)),
         preset=str(settings.get("export.preset", "medium")),
         video_codec=str(settings.get("export.video_codec", "libx264")),

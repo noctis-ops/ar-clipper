@@ -142,7 +142,8 @@ python -m cli.main clip "https://youtube.com/watch?v=XXXX" \
 | `test_analyze.py` *(م2)* | 40 | ✅ | لا |
 | `test_content_safety.py` *(م2)* | 23 | ✅ | لا |
 | `test_suggest.py` *(م2)* | 19 | ✅ | لا |
-| **الإجمالي** | **331** | ✅ | — |
+| `test_polish_maintenance.py` | 30 | ✅ | لا |
+| **الإجمالي** | **361** | ✅ | — |
 
 ```bash
 pytest                 # كل الاختبارات
@@ -413,3 +414,6 @@ Ingest → Transcribe → Translate → [Diarize] → Analyze → Content Gen �
 | 2026-09-21 | إصلاح تسرّب ذاكرة في الواجهة (سقف JOBS/ANALYSES) | ✅ |
 | 2026-09-21 | اختبارات للوحدتين المهملتين: translate 21%→55%، transcribe 15%→30% | ✅ |
 | 2026-09-21 | الاختبارات 300 → 331 | ✅ |
+| 2026-09-21 | اللمسات النهائية (تطبيع ‎-16 LUFS + fade) مدموجة بلا تكلفة زمنية | ✅ |
+| 2026-09-21 | الصيانة التشغيلية: `clean` + `--resume` + `--dry-run` + `--json` | ✅ |
+| 2026-09-21 | الاختبارات 331 → 361 | ✅ |

@@ -25,8 +25,12 @@ from .common.logging_utils import get_logger
 from .common.schemas import ClipRequest, ClipResult, SourceVideo, Transcript
 from .common.text_utils import human_duration, slugify
 from .export.exporter import cleanup_temp, finalize_clip
+from .polish.finisher import build_audio_filter as polish_audio_filter
+from .polish.finisher import build_video_filter as polish_video_filter
+from .polish.finisher import is_enabled as polish_enabled
 from .ingest.downloader import ingest as ingest_source
 from .ingest.downloader import suggest_workspace_name
+from .maintenance import clip_exists
 from .reframe.center import reframe as reframe_video
 from .silence.remover import remap_transcript, remove_silence
 from .subtitles.builder import burn_subtitles, write_ass, write_sidecars
@@ -58,6 +62,8 @@ class PipelineOptions:
     subtitle_track: Optional[str] = None  # ar | source | bilingual
     snap_to_speech: bool = True
     fast_cut: bool = False
+    polish: bool = True
+    skip_existing: bool = False
     keep_temp: bool = False
     clip_name: Optional[str] = None
     reuse_transcript: bool = True
@@ -166,6 +172,31 @@ def stage_render_clip(
     clip_id = slugify(base, max_len=48, fallback="clip")
     stages: List[str] = []
 
+    # ---------------------------------------------- 0) الاستئناف
+    # مقطع مكتمل سابقاً لا يُعاد ترميزه. هذا يجعل إعادة تشغيل دفعة فاشلة
+    # تُكمل من حيث توقفت بدل البدء من الصفر.
+    if options.skip_existing:
+        existing = clip_exists(ctx.workspace, clip_id, settings)
+        if existing:
+            log.info("المقطع %s موجود مسبقاً — تخطّيه (--overwrite لإعادة الإنتاج).", clip_id)
+            progress("skip", f"تخطّي {clip_id} (موجود مسبقاً)")
+            info = probe(existing)
+            return ClipResult(
+                clip_id=clip_id,
+                video_path=str(existing),
+                duration=info.duration,
+                width=info.width,
+                height=info.height,
+                subtitle_files={
+                    fmt: str(existing.with_suffix(f".{fmt}"))
+                    for fmt in ("srt", "vtt", "ass")
+                    if existing.with_suffix(f".{fmt}").exists()
+                },
+                stages=["skipped"],
+                start=start,
+                end=end,
+            )
+
     # ---------------------------------------------- 1) القص
     progress("cut", f"قص المقطع {human_duration(start)} → {human_duration(end)}")
     cut_path = tmp_dir / f"{clip_id}__01_cut.mp4"
@@ -200,12 +231,44 @@ def stage_render_clip(
     # ---------------------------------------------- 3) إعادة التأطير 9:16
     out_w = int(settings.get("reframe.width", 1080))
     out_h = int(settings.get("reframe.height", 1920))
+    # اللمسات النهائية تُدمج في آخر تمريرة ترميز موجودة بدل إنشاء تمريرة
+    # خامسة: توفير دورة كاملة (كانت ~8s لمقطع 20s) وجودة أعلى.
+    clip_dur = max(0.0, end - start)
+    want_polish = options.polish and polish_enabled(settings)
+    will_burn = bool(
+        clip_transcript
+        and options.subtitles
+        and settings.get("subtitles.enabled", True)
+        and options.burn_subtitles
+        and settings.get("subtitles.burn", True)
+    )
+    fade_vf = polish_video_filter(settings, duration=clip_dur) if want_polish else ""
+    fade_af = (
+        polish_audio_filter(settings, duration=clip_dur, include_loudnorm=False)
+        if want_polish
+        else ""
+    )
+
+    did_reframe = False
     if options.reframe and settings.get("reframe.enabled", True):
         progress("reframe", "تحويل المقطع إلى مقاس 9:16")
         reframe_out = tmp_dir / f"{clip_id}__03_vertical.mp4"
-        current = reframe_video(current, reframe_out, settings=settings)
+        current = reframe_video(
+            current,
+            reframe_out,
+            settings=settings,
+            extra_video_filter="" if will_burn else fade_vf,
+            extra_audio_filter="" if will_burn else fade_af,
+        )
+        if not will_burn and (fade_vf or fade_af):
+            stages.append("polish")
         ctx.temp_files.append(current)
         stages.append("reframe")
+        # التطبيع دُمج داخل هذه التمريرة
+        did_reframe = bool(
+            settings.get("polish.enabled", True)
+            and settings.get("polish.normalize_audio", True)
+        )
     else:
         info = probe(current)
         out_w, out_h = info.width, info.height
@@ -241,9 +304,18 @@ def stage_render_clip(
                 )
             )
             burned = tmp_dir / f"{clip_id}__04_subbed.mp4"
-            current = burn_subtitles(current, ass_path, burned, settings=settings)
+            current = burn_subtitles(
+                current,
+                ass_path,
+                burned,
+                settings=settings,
+                extra_video_filter=fade_vf,
+                audio_filter=fade_af,
+            )
             ctx.temp_files.append(current)
             stages.append("burn")
+            if fade_vf or fade_af:
+                stages.append("polish")
     elif options.subtitles and not clip_transcript:
         log.warning("لا يوجد ترانسكربت لهذا المدى — تخطّي الترجمة المرئية.")
 

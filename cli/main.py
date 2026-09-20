@@ -14,6 +14,7 @@
 
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
 from typing import List, Optional
@@ -33,7 +34,9 @@ from core.common.logging_utils import setup_logging
 from core.common.schemas import ClipRequest, Transcript
 from core.common.text_utils import human_duration, parse_timestamp
 from core.ingest.licensing import describe_presets
+from core.ingest.downloader import suggest_workspace_name
 from core.pipeline import PipelineOptions, run_pipeline, stage_ingest, stage_transcript
+from core.maintenance import disk_report, sweep_tmp
 from core.presets import apply_preset_to_settings, get_preset, load_presets
 from core.suggest import suggest_clips
 
@@ -47,6 +50,58 @@ console = Console()
 
 
 # ============================================================ مساعدات العرض
+
+
+def _noop_progress(stage: str, message: str) -> None:
+    """تقدّم صامت — لوضع --json حيث يجب ألّا يلوّث شيء stdout."""
+
+
+def _suggestions_payload(source: str, result) -> dict:
+    """يحوّل نتيجة التحليل إلى JSON مستقر الشكل للأتمتة والسكربتات."""
+    items = []
+    for sug in result.suggestions:
+        item = {
+            "index": sug.index,
+            "start": round(sug.start, 2),
+            "end": round(sug.end, 2),
+            "duration": round(sug.duration, 2),
+            "score": round(sug.score, 4),
+            "kind": sug.kind,
+            "reason": sug.reason,
+            "title": sug.title,
+            "description": sug.description,
+            "hashtags": list(sug.hashtags),
+            "hook": sug.hook,
+            "speaker": sug.speaker,
+            "text": sug.text,
+            "translation": sug.translation,
+            "generated_by": sug.generated_by,
+        }
+        if sug.part is not None:
+            item["part"] = sug.part
+            item["total_parts"] = sug.total_parts
+        items.append(item)
+
+    safety = None
+    if result.safety is not None:
+        safety = {
+            "level": getattr(result.safety, "level", None),
+            "flags": [
+                getattr(f, "label", str(f)) for f in getattr(result.safety, "flags", [])
+            ],
+        }
+
+    return {
+        "source": str(source),
+        "workspace": suggest_workspace_name(result.source),
+        "duration": round(result.source.duration or 0.0, 2),
+        "transcript_path": result.transcript_path,
+        "speakers": dict(result.speakers),
+        "safety": safety,
+        "elapsed": round(result.elapsed, 2),
+        "count": len(items),
+        "suggestions": items,
+    }
 
 
 def _progress(stage: str, message: str) -> None:
@@ -171,6 +226,15 @@ def clip_command(
         False, "--fast-cut", help="قص سريع بدون إعادة ترميز (أقل دقة على الإطار)."
     ),
     keep_temp: bool = typer.Option(False, "--keep-temp", help="الاحتفاظ بالملفات الوسيطة."),
+    no_polish: bool = typer.Option(
+        False, "--no-polish", help="تعطيل تطبيع الصوت والظهور/الاختفاء الناعم."
+    ),
+    resume: bool = typer.Option(
+        False, "--resume", help="تخطّي المقاطع المنتَجة مسبقاً (لإكمال دفعة متوقفة)."
+    ),
+    dry_run: bool = typer.Option(
+        False, "--dry-run", help="اعرض ما سيحدث دون تنفيذ أي معالجة."
+    ),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="سجلات تفصيلية."),
 ):
     setup_logging("DEBUG" if verbose else "INFO", force=True)
@@ -213,9 +277,20 @@ def clip_command(
         options.burn_subtitles = False
     if fast_cut:
         options.fast_cut = True
+    if no_polish:
+        options.polish = False
+    if resume:
+        options.skip_existing = True
 
     try:
         requests = _parse_ranges(start, end, ranges)
+
+        if dry_run:
+            if not requests:
+                _fail(ArClipperError("--dry-run يحتاج مدى محدداً (-s و -e)."))
+                return
+            _show_plan(source, requests, options, settings, preset_key=preset)
+            raise typer.Exit(code=0)
 
         if interactive or not requests:
             console.print(Panel("الوضع التفاعلي: سنفرّغ الفيديو أولاً ثم تختار المدى.", style="cyan"))
@@ -256,6 +331,59 @@ def clip_command(
     except KeyboardInterrupt:  # pragma: no cover
         console.print("\n[yellow]أُلغيت العملية بواسطة المستخدم.[/]")
         raise typer.Exit(code=130)
+
+
+def _show_plan(source, requests, options, settings, *, preset_key=None) -> None:
+    """يعرض خطة التنفيذ دون تشغيلها (--dry-run)."""
+    stages = ["ingest"]
+    needs_tx = (options.subtitles and settings.get("subtitles.enabled", True)) or options.snap_to_speech
+    if needs_tx:
+        stages.append("transcribe")
+        if options.translate:
+            stages.append("translate")
+    stages.append("cut")
+    if options.remove_silence and settings.get("silence.enabled", True):
+        stages.append("silence")
+    if options.reframe and settings.get("reframe.enabled", True):
+        stages.append("reframe")
+    if options.subtitles and settings.get("subtitles.enabled", True):
+        stages.append("subtitles")
+        if options.burn_subtitles and settings.get("subtitles.burn", True):
+            stages.append("burn")
+    if options.polish and settings.get("polish.enabled", True):
+        stages.append("polish")
+    stages.append("export")
+
+    table = Table(title="خطة التنفيذ (لن يُنفَّذ شيء)", header_style="bold cyan")
+    table.add_column("البند")
+    table.add_column("القيمة", overflow="fold")
+    table.add_row("المصدر", str(source))
+    if preset_key:
+        table.add_row("المسار الجاهز", preset_key)
+    table.add_row("عدد المقاطع", str(len(requests)))
+    for i, r in enumerate(requests, 1):
+        table.add_row(
+            f"  مقطع {i}",
+            f"{human_duration(r.start)} → {human_duration(r.end)}"
+            f"  ({human_duration(max(0, r.end - r.start))})",
+        )
+    table.add_row("المحطات", " → ".join(stages))
+    table.add_row("نموذج التفريغ", str(options.transcribe_model or settings.get("transcribe.model")))
+    table.add_row("الترجمة", "نعم" if options.translate else "لا")
+    table.add_row(
+        "المقاس",
+        f"{settings.get('reframe.width')}x{settings.get('reframe.height')}"
+        if options.reframe else "كما هو",
+    )
+    table.add_row(
+        "تطبيع الصوت",
+        f"{settings.get('polish.loudness_target')} LUFS"
+        if options.polish and settings.get("polish.normalize_audio", True) else "لا",
+    )
+    table.add_row("أساس الاستخدام", options.license_note or "(الافتراضي)")
+    table.add_row("مجلد الإخراج", str(settings.path("paths.clips")))
+    console.print(table)
+    console.print("[dim]أزل [cyan]--dry-run[/] للتنفيذ الفعلي.[/]")
 
 
 # ============================================================ suggest
@@ -331,9 +459,15 @@ def suggest_command(
         None, "--pick", help="أنتج أرقاماً محددة فقط، مثال: 0,2,5"
     ),
     preset: str = typer.Option("campaign", "--preset", "-p", help="المسار الجاهز للإنتاج."),
+    resume: bool = typer.Option(
+        False, "--resume", help="تخطّي المقاطع المنتَجة مسبقاً (لإكمال دفعة متوقفة)."
+    ),
+    as_json: bool = typer.Option(
+        False, "--json", help="أخرج النتيجة JSON فقط (للأتمتة والسكربتات)."
+    ),
     verbose: bool = typer.Option(False, "--verbose", "-v"),
 ):
-    setup_logging("DEBUG" if verbose else "INFO", force=True)
+    setup_logging("ERROR" if as_json else ("DEBUG" if verbose else "INFO"), force=True)
     settings = load_settings()
 
     options = PipelineOptions(
@@ -348,7 +482,7 @@ def suggest_command(
             source,
             options=options,
             settings=settings,
-            progress=_progress,
+            progress=(_noop_progress if as_json else _progress),
             max_moments=count,
             analyze_engine=engine,
             diarize=False if no_diarize else None,
@@ -358,6 +492,10 @@ def suggest_command(
     except ArClipperError as exc:
         _fail(exc)
         return
+
+    if as_json and not (produce or pick):
+        print(json.dumps(_suggestions_payload(source, result), ensure_ascii=False, indent=2))
+        raise typer.Exit(code=0)
 
     if not result.suggestions:
         console.print(
@@ -403,7 +541,7 @@ def suggest_command(
     try:
         chosen = get_preset(preset)
         apply_preset_to_settings(chosen, settings)
-        prod_options = PipelineOptions(license_note=license_note)
+        prod_options = PipelineOptions(license_note=license_note, skip_existing=resume)
         for key, value in chosen.options.items():
             if hasattr(prod_options, key):
                 setattr(prod_options, key, value)
@@ -860,6 +998,43 @@ def doctor_command():
             border_style="green",
         )
     )
+
+
+@app.command("clean", help="🧹 تنظيف الملفات المؤقتة وعرض استهلاك المساحة.")
+def clean_command(
+    hours: float = typer.Option(
+        24.0, "--older-than", help="احذف المؤقتات الأقدم من كذا ساعة (0 = كل شيء)."
+    ),
+    dry_run: bool = typer.Option(
+        False, "--dry-run", help="اعرض ما سيُحذف دون حذفه فعلياً."
+    ),
+):
+    setup_logging("INFO", force=True)
+    settings = load_settings()
+
+    table = Table(title="استهلاك المساحة", header_style="bold cyan")
+    table.add_column("المجلد")
+    table.add_column("الحجم", justify="right")
+    table.add_column("ملفات", justify="right")
+    total = 0
+    for label, path, size, count in disk_report(settings):
+        total += size
+        table.add_row(label, f"{size / 1048576:.1f} MB", str(count))
+    table.add_row("[bold]الإجمالي[/]", f"[bold]{total / 1048576:.1f} MB[/]", "")
+    console.print(table)
+
+    result = sweep_tmp(settings, older_than_hours=hours, dry_run=dry_run)
+    if result.removed == 0:
+        console.print("[green]لا ملفات مؤقتة تحتاج تنظيفاً.[/]")
+    elif dry_run:
+        console.print(
+            f"[yellow]سيُحذف {result.removed} ملفاً "
+            f"({result.freed_mb:.1f} MB). أزل --dry-run للتنفيذ.[/]"
+        )
+    else:
+        console.print(
+            f"[green]✅ حُذف {result.removed} ملفاً وتحرّر {result.freed_mb:.1f} MB.[/]"
+        )
 
 
 def main() -> None:
