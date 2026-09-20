@@ -34,7 +34,10 @@ ARABIC_STOPWORDS: Set[str] = {
 }
 
 _DIACRITICS = re.compile(r"[\u064B-\u0652\u0670\u0640]")
-_NON_WORD = re.compile(r"[^\w\u0600-\u06FF]+")
+# ملاحظة: ``\w`` في Python يشمل علامات الترقيم العربية (، ؛ ؟) لأنها ضمن
+# نطاق Arabic، فلا بد من استثنائها صراحةً وإلا التصقت بالكلمة وأفسدت المطابقة.
+_ARABIC_PUNCT = "\u060C\u061B\u061F\u0640\u066A-\u066D\u06D4"
+_NON_WORD = re.compile(rf"[^\w\u0600-\u06FF]+|[{_ARABIC_PUNCT}]+")
 
 
 def normalize_word(text: str) -> str:

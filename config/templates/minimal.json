@@ -1,0 +1,13 @@
+{
+  "key": "minimal",
+  "label": "هادئ",
+  "description": "خط أصغر بلا حدّ سميك — للمحتوى الجادّ والتعليمي.",
+  "overrides": {
+    "subtitles": {
+      "font_size": 46, "primary_color": "#F5F5F5", "outline_color": "#1A1A1A",
+      "outline": 2, "shadow": 0, "bold": false, "margin_v": 150,
+      "animated": false, "max_line_chars": 42
+    },
+    "thumbnail": { "font_scale": 0.062, "max_line_chars": 26 }
+  }
+}

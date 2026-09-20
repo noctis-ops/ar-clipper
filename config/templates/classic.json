@@ -1,0 +1,13 @@
+{
+  "key": "classic",
+  "label": "كلاسيكي",
+  "description": "أبيض واضح على حدّ أسود — الأكثر أماناً للقراءة على أي خلفية.",
+  "overrides": {
+    "subtitles": {
+      "font_size": 54, "primary_color": "#FFFFFF", "outline_color": "#000000",
+      "outline": 3, "shadow": 1, "bold": true, "margin_v": 180,
+      "animated": false
+    },
+    "thumbnail": { "font_scale": 0.075, "max_line_chars": 22 }
+  }
+}

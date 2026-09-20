@@ -75,6 +75,23 @@ class Settings:
     source_path: Path | None = None
     root: Path = PROJECT_ROOT
 
+    # -------------------------------------------------- عزل
+    def clone(self) -> "Settings":
+        """نسخة مستقلة قابلة للتعديل بأمان.
+
+        ``load_settings()`` يرجع كائناً واحداً مُخزَّناً بالكاش، فتعديله مباشرةً
+        (بقالب أو مسار جاهز) يسرّب التغيير إلى كل مَن يستدعيه لاحقاً — وهو خطأ
+        قاتل في خادم الواجهة الذي يعالج مهاماً متتابعة. استخدم ``clone()`` قبل
+        أي تعديل خاص بمهمة واحدة.
+        """
+        import copy
+
+        return Settings(
+            data=copy.deepcopy(self.data),
+            source_path=self.source_path,
+            root=self.root,
+        )
+
     # -------------------------------------------------- وصول عام
     def get(self, dotted: str, default: Any = None) -> Any:
         """يقرأ قيمة عبر مسار نقطي، مثال: ``settings.get("export.crf", 20)``."""

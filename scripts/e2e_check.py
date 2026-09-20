@@ -167,6 +167,51 @@ def main() -> int:
         checks.append(("كل المحطات نُفّذت", expected_stages.issubset(set(meta["stages"])),
                        " → ".join(meta["stages"])))
 
+        # ---------- المرحلة 3: الهوية البصرية والتصميم ----------
+        thumb = Path(result.thumbnail_path) if result.thumbnail_path else None
+        checks.append((
+            "الصورة المصغّرة مولَّدة تلقائياً",
+            bool(thumb and thumb.exists() and thumb.stat().st_size > 5_000),
+            f"{thumb.name} ({thumb.stat().st_size // 1024} KB)" if thumb and thumb.exists() else "مفقودة",
+        ))
+        checks.append((
+            "محطة thumbnail مسجَّلة في البيانات الوصفية",
+            "thumbnail" in meta.get("stages", []),
+            " → ".join(meta.get("stages", [])),
+        ))
+
+        ass_text = Path(result.subtitle_files["ass"]).read_text(encoding="utf-8")
+        checks.append((
+            "اللون الثانوي ليس أحمر ASS الافتراضي",
+            "&H000000FF" not in ass_text,
+            "مناسب للكاريوكي",
+        ))
+
+        # ترجمة متحركة: تُبنى وتُفحص مباشرةً (لا تُحرق حتى لا يطول الفحص)
+        from core.subtitles.builder import write_ass as _write_ass
+
+        anim_path = _write_ass(
+            transcript, settings.path("paths.tmp") / "e2e-anim.ass",
+            track="ar", settings=settings, animated=True,
+        )
+        anim_text = anim_path.read_text(encoding="utf-8")
+        checks.append((
+            "الترجمة المتحركة تبني وسوم كاريوكي",
+            "\\k" in anim_text and "\\fad(" in anim_text,
+            f"{anim_text.count('Dialogue')} حدث",
+        ))
+        anim_path.unlink(missing_ok=True)
+
+        # تشكيل العربية للصورة المصغّرة
+        from core.design.thumbnail import shape_arabic
+
+        shaped = shape_arabic("الذكاء الاصطناعي 2026")
+        checks.append((
+            "تشكيل العربية في الصورة المصغّرة",
+            "2026" in shaped and "الذكاء" not in shaped,
+            "حروف موصولة والأرقام بترتيبها",
+        ))
+
         tmp_left = list(settings.path("paths.tmp").glob("e2e-demo*"))
         checks.append(("تنظيف الملفات الوسيطة", not tmp_left, f"متبقٍ: {len(tmp_left)}"))
 

@@ -357,16 +357,31 @@ def apply_filters(
     audio_bitrate: str = "160k",
     fps: Optional[int] = None,
     extra_args: Optional[List[str]] = None,
+    extra_inputs: Optional[List[str]] = None,
 ) -> Path:
-    """يطبّق سلسلة فلاتر ffmpeg على ملف ويعيد الترميز."""
+    """يطبّق سلسلة فلاتر ffmpeg على ملف ويعيد الترميز.
+
+    ``extra_inputs`` (صور الشعار مثلاً) تُضاف كمدخلات إضافية، وعندها يُستخدم
+    ``-filter_complex`` بدل ``-vf`` لأن التركيب يحتاج أكثر من مصدر.
+    """
     dst = Path(destination)
     dst.parent.mkdir(parents=True, exist_ok=True)
+    extra_inputs = list(extra_inputs or [])
 
     args: List[str] = ["-i", str(source)]
-    if video_filter:
-        args += ["-vf", video_filter]
-    if audio_filter:
-        args += ["-af", audio_filter]
+    for extra in extra_inputs:
+        args += ["-i", str(extra)]
+
+    if extra_inputs and video_filter:
+        # سلسلة الفيديو تبدأ من [0:v] وتنتهي بمخرج مُسمّى نختاره صراحةً
+        args += ["-filter_complex", video_filter, "-map", "[vout]", "-map", "0:a?"]
+        if audio_filter:
+            args += ["-af", audio_filter]
+    else:
+        if video_filter:
+            args += ["-vf", video_filter]
+        if audio_filter:
+            args += ["-af", audio_filter]
     if fps:
         args += ["-r", str(fps)]
     args += [

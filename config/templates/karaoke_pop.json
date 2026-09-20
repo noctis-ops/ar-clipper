@@ -1,0 +1,15 @@
+{
+  "key": "karaoke_pop",
+  "label": "كاريوكي متحرك",
+  "description": "تلوين الكلمة أثناء نطقها مع حركة ظهور — الأعلى في نسبة الاحتفاظ.",
+  "overrides": {
+    "subtitles": {
+      "font_size": 60, "primary_color": "#FFFFFF", "secondary_color": "#7A8288",
+      "outline_color": "#000000", "outline": 4, "bold": true, "margin_v": 200,
+      "animated": true, "highlight_keywords": true, "highlight_color": "#00E5FF",
+      "pop_in": true, "fade_ms": 140, "max_line_chars": 28
+    },
+    "reframe": { "mode": "face_track" },
+    "thumbnail": { "font_scale": 0.08 }
+  }
+}

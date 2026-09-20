@@ -160,6 +160,7 @@ def reframe(
     focus_y: Optional[float] = None,
     extra_video_filter: str = "",
     extra_audio_filter: str = "",
+    branding=None,
 ) -> Path:
     """يحوّل الفيديو إلى المقاس العمودي المطلوب.
 
@@ -221,11 +222,20 @@ def reframe(
     if extra_audio_filter:
         af = f"{af},{extra_audio_filter}" if af else extra_audio_filter
 
+    # الهوية البصرية تُركَّب في نفس التمريرة (المرحلة 3)
+    extra_inputs = []
+    if branding is not None and getattr(branding, "active", False):
+        from ..design.branding import compose_filter_graph
+
+        vf = compose_filter_graph(branding, vf)
+        extra_inputs = list(branding.extra_inputs)
+
     return apply_filters(
         src,
         output_path,
         video_filter=vf,
         audio_filter=af,
+        extra_inputs=extra_inputs,
         crf=int(settings.get("export.crf", 20)),
         preset=str(settings.get("export.preset", "medium")),
         video_codec=str(settings.get("export.video_codec", "libx264")),

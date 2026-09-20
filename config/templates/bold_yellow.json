@@ -1,0 +1,13 @@
+{
+  "key": "bold_yellow",
+  "label": "أصفر جريء",
+  "description": "خط كبير أصفر بحدّ سميك — النمط السائد في المقاطع القصيرة.",
+  "overrides": {
+    "subtitles": {
+      "font_size": 64, "primary_color": "#FFE81F", "outline_color": "#000000",
+      "outline": 5, "shadow": 2, "bold": true, "margin_v": 220,
+      "animated": true, "highlight_color": "#FFFFFF", "max_line_chars": 30
+    },
+    "thumbnail": { "font_scale": 0.085, "max_line_chars": 18 }
+  }
+}

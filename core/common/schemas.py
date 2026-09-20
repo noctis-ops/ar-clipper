@@ -250,6 +250,10 @@ class ClipRequest:
     end: float
     name: Optional[str] = None
     title: Optional[str] = None
+    # المرحلة 3: رقم الجزء ضمن سلسلة، ونص الصورة المصغّرة
+    part: Optional[int] = None
+    total_parts: Optional[int] = None
+    hook: Optional[str] = None
 
     @property
     def duration(self) -> float:
@@ -272,6 +276,8 @@ class ClipResult:
     stages: List[str] = field(default_factory=list)
     width: int = 0
     height: int = 0
+    # المرحلة 3: الصورة المصغّرة المولَّدة تلقائياً
+    thumbnail_path: Optional[str] = None
 
     def to_dict(self) -> Dict[str, Any]:
         d = asdict(self)

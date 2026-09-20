@@ -1,0 +1,14 @@
+{
+  "key": "news",
+  "label": "إخباري",
+  "description": "شريط سفلي معتم بنص أبيض — مناسب للاقتباسات والأرقام.",
+  "overrides": {
+    "subtitles": {
+      "font_size": 50, "primary_color": "#FFFFFF", "outline_color": "#000000",
+      "back_color": "#C8101820", "outline": 1, "shadow": 0, "bold": true,
+      "margin_v": 140, "animated": true, "highlight_color": "#FF5A1F",
+      "max_line_chars": 36
+    },
+    "thumbnail": { "font_scale": 0.07, "max_line_chars": 24 }
+  }
+}

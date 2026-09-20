@@ -180,7 +180,9 @@ def _run_job(job: Job, payload: ClipPayload) -> None:
     """ينفّذ خط الأنابيب في خيط منفصل ويبثّ التقدّم."""
     try:
         job.status = "running"
-        settings = load_settings()
+        # نسخة مستقلة لكل مهمة: الكائن المُخزَّن بالكاش مشترك بين كل الطلبات،
+        # فتطبيق مسار جاهز عليه مباشرةً يسرّب إعدادات مهمة إلى التالية.
+        settings = load_settings().clone()
 
         chosen = get_preset(payload.preset)
         apply_preset_to_settings(chosen, settings)
@@ -296,7 +298,7 @@ def _run_suggest(job: Job, payload: SuggestPayload) -> None:
 
     try:
         job.status = "running"
-        settings = load_settings()
+        settings = load_settings().clone()
         options = PipelineOptions(
             license_note=payload.license_key, translate=payload.translate
         )
@@ -351,7 +353,7 @@ def _run_produce(job: Job, payload: ProducePayload, analysis: Any) -> None:
     """ينتج المقاطع المختارة من تحليل سابق (بلا إعادة تفريغ)."""
     try:
         job.status = "running"
-        settings = load_settings()
+        settings = load_settings().clone()
         chosen = get_preset(payload.preset)
         apply_preset_to_settings(chosen, settings)
 

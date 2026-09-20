@@ -303,6 +303,7 @@ def burn_subtitles(
     fonts_dir: Optional[str | Path] = None,
     extra_video_filter: str = "",
     audio_filter: str = "",
+    branding=None,
 ) -> Path:
     """يحرق ملف ASS على الفيديو عبر فلتر ``ass`` في ffmpeg.
 
@@ -320,12 +321,20 @@ def burn_subtitles(
     if extra_video_filter:
         vf = f"{vf},{extra_video_filter}"
 
+    extra_inputs = []
+    if branding is not None and getattr(branding, "active", False):
+        from ..design.branding import compose_filter_graph
+
+        vf = compose_filter_graph(branding, vf)
+        extra_inputs = list(branding.extra_inputs)
+
     log.info("حرق الترجمة على الفيديو...")
     return apply_filters(
         video_path,
         output_path,
         video_filter=vf,
         audio_filter=audio_filter,
+        extra_inputs=extra_inputs,
         crf=int(settings.get("export.crf", 20)),
         preset=str(settings.get("export.preset", "medium")),
         video_codec=str(settings.get("export.video_codec", "libx264")),

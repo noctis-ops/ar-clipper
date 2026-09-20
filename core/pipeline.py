@@ -12,6 +12,7 @@
 
 from __future__ import annotations
 
+import json
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -30,6 +31,8 @@ from .polish.finisher import build_video_filter as polish_video_filter
 from .polish.finisher import is_enabled as polish_enabled
 from .ingest.downloader import ingest as ingest_source
 from .ingest.downloader import suggest_workspace_name
+from .design.branding import build_branding
+from .design.thumbnail import generate_thumbnail
 from .maintenance import clip_exists
 from .reframe.center import reframe as reframe_video
 from .silence.remover import remap_transcript, remove_silence
@@ -64,6 +67,8 @@ class PipelineOptions:
     fast_cut: bool = False
     polish: bool = True
     skip_existing: bool = False
+    branding: bool = True
+    thumbnail: bool = True
     keep_temp: bool = False
     clip_name: Optional[str] = None
     reuse_transcript: bool = True
@@ -147,6 +152,21 @@ def stage_transcript(
     transcript.save(cache_path)
     log.info("حُفظ الترانسكربت: %s", cache_path)
     return transcript, cache_path
+
+
+def _patch_metadata(path: Optional[str], updates: dict) -> None:
+    """يحدّث ملف البيانات الوصفية بعد كتابته (لخطوات ما بعد التصدير)."""
+    if not path:
+        return
+    try:
+        file = Path(path)
+        data = json.loads(file.read_text(encoding="utf-8"))
+        data.update(updates)
+        file.write_text(
+            json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
+    except Exception as exc:  # pragma: no cover
+        log.debug("تعذّر تحديث البيانات الوصفية: %s", exc)
 
 
 def stage_render_clip(
@@ -249,6 +269,27 @@ def stage_render_clip(
         else ""
     )
 
+    # الهوية البصرية (المرحلة 3) تُدمج هي الأخرى في آخر تمريرة ترميز
+    brand_plan = None
+    if options.branding:
+        try:
+            brand_plan = build_branding(
+                settings=settings,
+                video_width=out_w,
+                video_height=out_h,
+                part=request.part,
+                total_parts=request.total_parts,
+                work_dir=tmp_dir,
+                name_hint=clip_id,
+            )
+            if brand_plan.text_ass:
+                ctx.temp_files.append(brand_plan.text_ass)
+        except Exception as exc:  # الهوية تحسين، لا تُفشل الإنتاج
+            log.warning("تعذّر بناء الهوية البصرية (%s) — تم تخطّيها.", exc)
+            brand_plan = None
+    brand_on_burn = bool(brand_plan and brand_plan.active and will_burn)
+    brand_on_reframe = bool(brand_plan and brand_plan.active and not will_burn)
+
     did_reframe = False
     if options.reframe and settings.get("reframe.enabled", True):
         progress("reframe", "تحويل المقطع إلى مقاس 9:16")
@@ -259,9 +300,12 @@ def stage_render_clip(
             settings=settings,
             extra_video_filter="" if will_burn else fade_vf,
             extra_audio_filter="" if will_burn else fade_af,
+            branding=brand_plan if brand_on_reframe else None,
         )
         if not will_burn and (fade_vf or fade_af):
             stages.append("polish")
+        if brand_on_reframe:
+            stages.append("branding")
         ctx.temp_files.append(current)
         stages.append("reframe")
         # التطبيع دُمج داخل هذه التمريرة
@@ -311,11 +355,14 @@ def stage_render_clip(
                 settings=settings,
                 extra_video_filter=fade_vf,
                 audio_filter=fade_af,
+                branding=brand_plan if brand_on_burn else None,
             )
             ctx.temp_files.append(current)
             stages.append("burn")
             if fade_vf or fade_af:
                 stages.append("polish")
+            if brand_on_burn:
+                stages.append("branding")
     elif options.subtitles and not clip_transcript:
         log.warning("لا يوجد ترانسكربت لهذا المدى — تخطّي الترجمة المرئية.")
 
@@ -335,6 +382,28 @@ def stage_render_clip(
         end=end,
         settings=settings,
     )
+    # ---------------------------------------------- 6) الصورة المصغّرة (المرحلة 3)
+    if options.thumbnail and settings.get("thumbnail.enabled", True):
+        try:
+            hook_text = request.hook or request.title or ""
+            thumb = generate_thumbnail(
+                result.video_path,
+                Path(result.video_path).with_suffix(".jpg"),
+                text=hook_text,
+                settings=settings,
+            )
+            result.thumbnail_path = str(thumb)
+            stages.append("thumbnail")
+            progress("thumbnail", "الصورة المصغّرة جاهزة")
+            # البيانات الوصفية كُتبت قبل هذه الخطوة — نحدّثها حتى يبقى
+            # الملف مطابقاً للواقع (المحطات + مسار الصورة).
+            _patch_metadata(
+                result.metadata_path,
+                {"stages": list(stages), "thumbnail": str(thumb), "phase": 3},
+            )
+        except Exception as exc:  # الصورة المصغّرة تحسين، لا تُفشل الإنتاج
+            log.warning("تعذّر توليد الصورة المصغّرة (%s).", exc)
+
     result.stages = stages
     return result
 
@@ -370,9 +439,14 @@ def run_pipeline(
     # 2) التفريغ + الترجمة
     # التفريغ أبطأ محطة بفارق كبير، ويحتاج تحميل نموذج. لا نشغّله إطلاقاً
     # إن كان الناتج لن يُستخدم (لا ترجمة مرئية ولا محاذاة مع الكلام).
-    needs_transcript = bool(
+    # محاذاة القص مع الكلام تحسين لطيف، لكنها لا تبرّر تحميل نموذج التفريغ
+    # كاملاً حين لا يكون هناك ترجمة. من طلب --no-subtitles يريد نتيجة سريعة.
+    wants_subtitles = bool(
         options.subtitles and settings.get("subtitles.enabled", True)
-    ) or options.snap_to_speech
+    )
+    needs_transcript = wants_subtitles or (
+        options.snap_to_speech and transcript is not None
+    )
 
     if transcript is not None:
         ctx.transcript = transcript

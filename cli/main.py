@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import json
 import sys
+from dataclasses import replace
 from pathlib import Path
 from typing import List, Optional
 
@@ -37,6 +38,7 @@ from core.ingest.licensing import describe_presets
 from core.ingest.downloader import suggest_workspace_name
 from core.pipeline import PipelineOptions, run_pipeline, stage_ingest, stage_transcript
 from core.maintenance import disk_report, sweep_tmp
+from core.design.templates import apply_template, get_template, load_templates
 from core.presets import apply_preset_to_settings, get_preset, load_presets
 from core.suggest import suggest_clips
 
@@ -229,6 +231,35 @@ def clip_command(
     no_polish: bool = typer.Option(
         False, "--no-polish", help="تعطيل تطبيع الصوت والظهور/الاختفاء الناعم."
     ),
+    face_track: bool = typer.Option(
+        False, "--face-track", help="🎯 تتبّع وجه المتحدث بدل القص المركزي الثابت."
+    ),
+    animated_subs: bool = typer.Option(
+        False, "--animated-subs", help="✨ ترجمة متحركة بأسلوب الكاريوكي."
+    ),
+    no_thumbnail: bool = typer.Option(
+        False, "--no-thumbnail", help="بدون صورة مصغّرة تلقائية."
+    ),
+    no_branding: bool = typer.Option(
+        False, "--no-branding", help="بدون شعار وعلامة مائية."
+    ),
+    template: Optional[str] = typer.Option(
+        None, "--template", "-T",
+        help="قالب التصميم: classic|bold_yellow|karaoke_pop|minimal|news.",
+    ),
+    variants: Optional[str] = typer.Option(
+        None, "--variants",
+        help="أنتج نسخاً بقوالب متعددة، مثال: classic,bold_yellow,news",
+    ),
+    hook: Optional[str] = typer.Option(
+        None, "--hook", help="نص الصورة المصغّرة الجذاب."
+    ),
+    part: Optional[int] = typer.Option(
+        None, "--part", help="رقم الجزء ضمن سلسلة (مع --total-parts)."
+    ),
+    total_parts: Optional[int] = typer.Option(
+        None, "--total-parts", help="إجمالي أجزاء السلسلة."
+    ),
     resume: bool = typer.Option(
         False, "--resume", help="تخطّي المقاطع المنتَجة مسبقاً (لإكمال دفعة متوقفة)."
     ),
@@ -238,7 +269,8 @@ def clip_command(
     verbose: bool = typer.Option(False, "--verbose", "-v", help="سجلات تفصيلية."),
 ):
     setup_logging("DEBUG" if verbose else "INFO", force=True)
-    settings = load_settings()
+    # نسخة مستقلة: تعديل الكائن المُخزَّن بالكاش يسرّب الإعدادات عالمياً
+    settings = load_settings().clone()
 
     # المسار الجاهز يُطبَّق أولاً، ثم تتجاوزه أعلام CLI الصريحة
     options = PipelineOptions()
@@ -281,15 +313,90 @@ def clip_command(
         options.polish = False
     if resume:
         options.skip_existing = True
+    if no_thumbnail:
+        options.thumbnail = False
+    if no_branding:
+        options.branding = False
+    if face_track:
+        settings.data.setdefault("reframe", {})["mode"] = "face_track"
+    if animated_subs:
+        settings.data.setdefault("subtitles", {})["animated"] = True
+    if template:
+        try:
+            apply_template(get_template(template, settings), settings)
+        except ArClipperError as exc:
+            _fail(exc)
+            return
 
     try:
         requests = _parse_ranges(start, end, ranges)
+
+        for req in requests:
+            if hook:
+                req.hook = hook
+            if part:
+                req.part = part
+                req.total_parts = total_parts or part
 
         if dry_run:
             if not requests:
                 _fail(ArClipperError("--dry-run يحتاج مدى محدداً (-s و -e)."))
                 return
-            _show_plan(source, requests, options, settings, preset_key=preset)
+            _show_plan(source, requests, options, settings, preset_key=preset, template_key=template)
+            raise typer.Exit(code=0)
+
+        if variants:
+            keys = [k.strip() for k in variants.split(",") if k.strip()]
+            limit = int(settings.get("variants.max_variants", 3))
+            if len(keys) > limit:
+                console.print(
+                    f"[yellow]عدد النسخ محدود بـ{limit} — سيُؤخذ أول {limit}.[/]"
+                )
+                keys = keys[:limit]
+            if not requests:
+                _fail(ArClipperError("--variants يحتاج مدى محدداً (-s و -e)."))
+                return
+
+            all_results = []
+            for key in keys:
+                try:
+                    variant_settings = load_settings().clone()
+                    if preset:
+                        apply_preset_to_settings(get_preset(preset), variant_settings)
+                    apply_template(get_template(key, variant_settings), variant_settings)
+                except ArClipperError as exc:
+                    _fail(exc)
+                    return
+
+                console.print(f"\n[bold cyan]◆ النسخة: {key}[/]")
+                variant_requests = [
+                    ClipRequest(
+                        start=r.start,
+                        end=r.end,
+                        name=f"{(r.name or options.clip_name or 'clip')}__{key}",
+                        title=r.title,
+                        part=r.part,
+                        total_parts=r.total_parts,
+                        hook=r.hook,
+                    )
+                    for r in requests
+                ]
+                variant_options = replace(options, clip_name=None)
+                all_results.extend(
+                    run_pipeline(
+                        source,
+                        variant_requests,
+                        options=variant_options,
+                        settings=variant_settings,
+                        progress=_progress,
+                    )
+                )
+
+            console.print()
+            _print_results(all_results)
+            console.print(
+                f"\n[bold green]✅ أُنتجت {len(all_results)} نسخة للمقارنة (A/B).[/]"
+            )
             raise typer.Exit(code=0)
 
         if interactive or not requests:
@@ -333,10 +440,10 @@ def clip_command(
         raise typer.Exit(code=130)
 
 
-def _show_plan(source, requests, options, settings, *, preset_key=None) -> None:
+def _show_plan(source, requests, options, settings, *, preset_key=None, template_key=None) -> None:
     """يعرض خطة التنفيذ دون تشغيلها (--dry-run)."""
     stages = ["ingest"]
-    needs_tx = (options.subtitles and settings.get("subtitles.enabled", True)) or options.snap_to_speech
+    needs_tx = options.subtitles and settings.get("subtitles.enabled", True)
     if needs_tx:
         stages.append("transcribe")
         if options.translate:
@@ -352,7 +459,11 @@ def _show_plan(source, requests, options, settings, *, preset_key=None) -> None:
             stages.append("burn")
     if options.polish and settings.get("polish.enabled", True):
         stages.append("polish")
+    if options.branding and settings.get("branding.enabled", False):
+        stages.append("branding")
     stages.append("export")
+    if options.thumbnail and settings.get("thumbnail.enabled", True):
+        stages.append("thumbnail")
 
     table = Table(title="خطة التنفيذ (لن يُنفَّذ شيء)", header_style="bold cyan")
     table.add_column("البند")
@@ -360,6 +471,8 @@ def _show_plan(source, requests, options, settings, *, preset_key=None) -> None:
     table.add_row("المصدر", str(source))
     if preset_key:
         table.add_row("المسار الجاهز", preset_key)
+    if template_key:
+        table.add_row("قالب التصميم", template_key)
     table.add_row("عدد المقاطع", str(len(requests)))
     for i, r in enumerate(requests, 1):
         table.add_row(
@@ -373,7 +486,12 @@ def _show_plan(source, requests, options, settings, *, preset_key=None) -> None:
     table.add_row(
         "المقاس",
         f"{settings.get('reframe.width')}x{settings.get('reframe.height')}"
+        f" ({settings.get('reframe.mode', 'center')})"
         if options.reframe else "كما هو",
+    )
+    table.add_row(
+        "ترجمة متحركة",
+        "نعم (كاريوكي)" if settings.get("subtitles.animated", False) else "لا",
     )
     table.add_row(
         "تطبيع الصوت",
@@ -997,6 +1115,31 @@ def doctor_command():
             title="[bold green]جاهز[/]",
             border_style="green",
         )
+    )
+
+
+@app.command("templates", help="🎨 عرض قوالب التصميم المتاحة (المرحلة 3).")
+def templates_command():
+    setup_logging("WARNING", force=True)
+    settings = load_settings()
+    found = load_templates(settings)
+    if not found:
+        console.print("[yellow]لا توجد قوالب في config/templates/[/]")
+        raise typer.Exit(code=0)
+
+    table = Table(title=f"قوالب التصميم ({len(found)})", header_style="bold magenta")
+    table.add_column("المفتاح", style="cyan")
+    table.add_column("الاسم")
+    table.add_column("الوصف", overflow="fold")
+    table.add_column("متحركة", justify="center")
+    for key in sorted(found):
+        tpl = found[key]
+        animated = tpl.overrides.get("subtitles", {}).get("animated", False)
+        table.add_row(key, tpl.label, tpl.description, "✨" if animated else "—")
+    console.print(table)
+    console.print(
+        "\n[dim]الاستخدام:  [cyan]ar-clipper clip <رابط> -s 0 -e 30 -T karaoke_pop[/]\n"
+        "مقارنة نسخ:  [cyan]--variants classic,bold_yellow,news[/][/]"
     )
 
 

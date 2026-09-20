@@ -200,8 +200,15 @@ class TestFullPipeline:
     def test_metadata_written(self, result):
         meta = json.loads(Path(result.metadata_path).read_text(encoding="utf-8"))
         assert meta["clip_id"] == "itest"
-        assert meta["phase"] == 1
+        # يصير 3 حين تُنتج الصورة المصغّرة (المرحلة 3)، و1 بدونها
+        assert meta["phase"] in (1, 3)
         assert meta["output"]["width"] == 1080
+
+    def test_thumbnail_generated(self, result):
+        """المرحلة 3: صورة مصغّرة تلقائية بجانب كل مقطع."""
+        assert result.thumbnail_path, "لم تُولَّد صورة مصغّرة"
+        thumb = Path(result.thumbnail_path)
+        assert thumb.exists() and thumb.stat().st_size > 5_000
 
     def test_license_recorded(self, result):
         """المبدأ 4: سند الترخيص يجب أن يُحفظ مع كل مقطع."""
