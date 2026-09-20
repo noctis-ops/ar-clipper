@@ -103,3 +103,43 @@ runtime:
   # حذف الملفات الوسيطة بعد نجاح المعالجة (القسم 14 من الوثيقة)
   cleanup_temp: true
   log_level: INFO
+
+# ==========================================================
+# المرحلة 2 — الذكاء في الاختيار والمحتوى
+# ==========================================================
+
+analyze:
+  # heuristic = بلا نموذج إطلاقاً | llm = النموذج مباشرةً | hybrid = الاثنان (الأدق)
+  engine: hybrid
+  # محرك النموذج: ollama (محلي مجاني) | none | api (اختياري بمفتاحك)
+  llm_engine: ollama
+  ollama_host: "http://127.0.0.1:11434"
+  # 16GB RAM → qwen2.5:7b (4.7GB). لجهاز أضعف: qwen2.5:3b (1.9GB)
+  model: "qwen2.5:7b"
+  num_ctx: 8192
+  timeout: 300
+  # عدد المقاطع المقترحة ومداها الزمني
+  max_moments: 8
+  min_duration: 20.0
+  max_duration: 70.0
+  # تقسيم الأفكار الطويلة إلى Part 1 / Part 2
+  split_long: true
+
+content_gen:
+  enabled: true
+  # توليد العناوين والهاشتاغات عبر النموذج (يسقط للاستدلال عند غيابه)
+  use_llm: true
+
+diarize:
+  # فصل المتحدثين — يحتاج توكن HuggingFace مجاني (راجع core/diarize/speakers.py)
+  enabled: true
+  model: "pyannote/speaker-diarization-3.1"
+  hf_token: null        # أو صدّر HF_TOKEN في البيئة
+  # للبودكاست الحواري (مضيف + ضيف) هذه القيم تسرّع وتدقّق النتيجة
+  min_speakers: null
+  max_speakers: null
+
+safety:
+  enabled: true
+  # مراجعة إضافية للترجمة عبر النموذج (أبطأ)
+  use_llm: false

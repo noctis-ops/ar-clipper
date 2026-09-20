@@ -35,6 +35,7 @@ from core.common.text_utils import human_duration, parse_timestamp
 from core.ingest.licensing import describe_presets
 from core.pipeline import PipelineOptions, run_pipeline, stage_ingest, stage_transcript
 from core.presets import apply_preset_to_settings, get_preset, load_presets
+from core.suggest import suggest_clips
 
 app = typer.Typer(
     name="ar-clipper",
@@ -255,6 +256,173 @@ def clip_command(
     except KeyboardInterrupt:  # pragma: no cover
         console.print("\n[yellow]أُلغيت العملية بواسطة المستخدم.[/]")
         raise typer.Exit(code=130)
+
+
+# ============================================================ suggest
+
+
+def _print_suggestions(result) -> None:
+    """يعرض المقترحات في جدول مقروء."""
+    table = Table(
+        title=f"المقاطع المقترحة ({len(result.suggestions)})",
+        header_style="bold magenta",
+        show_lines=True,
+    )
+    table.add_column("#", style="cyan", justify="center")
+    table.add_column("التوقيت", justify="center")
+    table.add_column("المدة", justify="center")
+    table.add_column("النوع", justify="center")
+    table.add_column("العنوان والسبب", overflow="fold")
+
+    kinds = {
+        "story": "📖 قصة", "opinion": "💭 رأي", "question": "❓ سؤال",
+        "surprise": "⚡ مفاجأة", "number": "📊 رقم", "insight": "💡 فكرة",
+        "dense": "🔥 ذروة", "general": "• عام",
+    }
+
+    for s in result.suggestions:
+        part = f" [dim](جزء {s.part}/{s.total_parts})[/]" if s.part else ""
+        speaker = f"\n[dim]المتحدث: {s.speaker}[/]" if s.speaker else ""
+        hook = f"\n[dim]Hook: {s.hook}[/]" if s.hook else ""
+        tags = f"\n[dim]{' '.join(s.hashtags[:5])}[/]" if s.hashtags else ""
+        table.add_row(
+            str(s.index),
+            f"{human_duration(s.start)}\n{human_duration(s.end)}",
+            human_duration(s.duration),
+            kinds.get(s.kind, s.kind),
+            f"[bold]{s.title or '(بلا عنوان)'}[/]{part}\n[dim]{s.reason}[/]{speaker}{hook}{tags}",
+        )
+    console.print(table)
+
+    if result.speakers:
+        console.print(
+            f"[dim]المتحدثون: {'، '.join(f'{v}' for v in result.speakers.values())}[/]"
+        )
+
+    if result.safety and result.safety.issues:
+        warns = result.safety.warnings
+        if warns:
+            panel = "\n".join(
+                f"• [{human_duration(i.start or 0)}] {i.message}" for i in warns[:8]
+            )
+            console.print(
+                Panel(panel, title="[bold yellow]ملاحظات قبل النشر[/]", border_style="yellow")
+            )
+
+
+@app.command("suggest", help="🤖 حلّل فيديو واقترح أفضل المقاطع تلقائياً (المرحلة 2).")
+def suggest_command(
+    source: str = typer.Argument(..., help="رابط فيديو أو مسار ملف محلي."),
+    license_note: str = typer.Option("", "--license", "-L", help="أساس الاستخدام."),
+    count: Optional[int] = typer.Option(None, "--count", "-c", help="عدد المقاطع المقترحة."),
+    engine: Optional[str] = typer.Option(
+        None, "--engine", help="محرك التحليل: heuristic|llm|hybrid."
+    ),
+    language: Optional[str] = typer.Option(None, "--language", "-l", help="لغة المصدر."),
+    model: Optional[str] = typer.Option(None, "--model", "-m", help="نموذج التفريغ."),
+    no_translate: bool = typer.Option(False, "--no-translate", help="بدون ترجمة للعربية."),
+    no_diarize: bool = typer.Option(False, "--no-diarize", help="بدون فصل متحدثين."),
+    no_content: bool = typer.Option(False, "--no-content", help="بدون عناوين وهاشتاغات."),
+    no_safety: bool = typer.Option(False, "--no-safety", help="بدون فحص السلامة."),
+    produce: bool = typer.Option(
+        False, "--produce", help="أنتج المقاطع مباشرةً بعد التحليل."
+    ),
+    pick: Optional[str] = typer.Option(
+        None, "--pick", help="أنتج أرقاماً محددة فقط، مثال: 0,2,5"
+    ),
+    preset: str = typer.Option("campaign", "--preset", "-p", help="المسار الجاهز للإنتاج."),
+    verbose: bool = typer.Option(False, "--verbose", "-v"),
+):
+    setup_logging("DEBUG" if verbose else "INFO", force=True)
+    settings = load_settings()
+
+    options = PipelineOptions(
+        license_note=license_note,
+        language=language,
+        transcribe_model=model,
+        translate=not no_translate,
+    )
+
+    try:
+        result = suggest_clips(
+            source,
+            options=options,
+            settings=settings,
+            progress=_progress,
+            max_moments=count,
+            analyze_engine=engine,
+            diarize=False if no_diarize else None,
+            content=False if no_content else None,
+            safety=False if no_safety else None,
+        )
+    except ArClipperError as exc:
+        _fail(exc)
+        return
+
+    if not result.suggestions:
+        console.print(
+            Panel(
+                "لم يُعثر على مقاطع مقترحة.\n"
+                "جرّب: [cyan]--engine heuristic[/] أو خفّض [cyan]analyze.min_duration[/].",
+                border_style="yellow",
+            )
+        )
+        raise typer.Exit(code=0)
+
+    console.print()
+    _print_suggestions(result)
+
+    indices = None
+    if pick:
+        try:
+            indices = [int(x.strip()) for x in pick.split(",") if x.strip()]
+        except ValueError:
+            _fail(ArClipperError(f"صيغة --pick غير صالحة: {pick} (مثال صحيح: 0,2,5)"))
+            return
+
+    if not produce and indices is None:
+        console.print(
+            Panel(
+                "لإنتاج المقاطع:\n"
+                f"  [cyan]ar-clipper suggest \"{source}\" --produce[/]           ← الكل\n"
+                f"  [cyan]ar-clipper suggest \"{source}\" --pick 0,2[/]          ← مختارة\n\n"
+                "[dim]التفريغ محفوظ، فلن يُعاد — الإنتاج سيبدأ مباشرةً.[/]",
+                title="[bold green]الخطوة التالية[/]",
+                border_style="green",
+            )
+        )
+        raise typer.Exit(code=0)
+
+    # ---- الإنتاج
+    requests = result.to_clip_requests(indices)
+    if not requests:
+        _fail(ArClipperError("لم يُطابق أي مقترح الأرقام المحددة."))
+        return
+
+    console.print(f"\n[bold]إنتاج {len(requests)} مقطعاً...[/]\n")
+    try:
+        chosen = get_preset(preset)
+        apply_preset_to_settings(chosen, settings)
+        prod_options = PipelineOptions(license_note=license_note)
+        for key, value in chosen.options.items():
+            if hasattr(prod_options, key):
+                setattr(prod_options, key, value)
+
+        results = run_pipeline(
+            source,
+            requests,
+            options=prod_options,
+            settings=settings,
+            progress=_progress,
+            source_video=result.source,
+        )
+    except ArClipperError as exc:
+        _fail(exc)
+        return
+
+    console.print()
+    _print_results(results)
+    console.print("\n[bold green]✅ اكتمل الإنتاج.[/]")
 
 
 # ============================================================ quickstart
@@ -558,6 +726,36 @@ def doctor_command():
             else:
                 table.add_row(label, warn, f"غير مثبّت (اختياري) — {note}")
 
+    # ---- المرحلة 2: الذكاء في الاختيار
+    try:
+        from core.analyze.llm_client import llm_available
+
+        settings_now = load_settings()
+        engine_name = settings_now.get("analyze.llm_engine", "ollama")
+        model_name = settings_now.get("analyze.model", "qwen2.5:7b")
+        ready, message = llm_available(settings_now)
+        table.add_row(
+            "نموذج اللغة (اقتراح المقاطع)",
+            ok if ready else warn,
+            f"{engine_name}/{model_name} — جاهز"
+            if ready
+            else f"غير جاهز — ستعمل الأداة بالاستدلال.\n{message.splitlines()[0]}",
+        )
+    except Exception as exc:
+        table.add_row("نموذج اللغة (اقتراح المقاطع)", warn, f"تعذّر الفحص: {exc}")
+
+    try:
+        from core.diarize.speakers import is_available as diarize_available
+
+        ready, message = diarize_available(load_settings())
+        table.add_row(
+            "فصل المتحدثين (مضيف/ضيف)",
+            ok if ready else warn,
+            "جاهز" if ready else message.splitlines()[0],
+        )
+    except Exception as exc:
+        table.add_row("فصل المتحدثين (مضيف/ضيف)", warn, f"تعذّر الفحص: {exc}")
+
     # GPU
     try:
         import torch  # type: ignore
@@ -630,6 +828,19 @@ def doctor_command():
             "الواجهة الرسومية غير مثبّتة:\n"
             "    [cyan]pip install fastapi \"uvicorn[standard]\"[/]  ثم:  [cyan]ar-clipper serve[/]"
         )
+
+    try:
+        from core.analyze.llm_client import llm_available as _llm_ok
+
+        if not _llm_ok(load_settings())[0]:
+            missing_optional.append(
+                "اقتراح المقاطع تلقائياً (المرحلة 2) يعمل أفضل بنموذج محلي مجاني:\n"
+                "    1) ثبّت Ollama من https://ollama.com\n"
+                "    2) [cyan]ollama pull qwen2.5:7b[/]\n"
+                "    بدونه تعمل الأداة بالاستدلال: [cyan]ar-clipper suggest <مصدر> --engine heuristic[/]"
+            )
+    except Exception:
+        pass
 
     if missing_optional:
         console.print(

@@ -123,12 +123,18 @@ def prepare_subtitle_text(
     return apply_rtl_marks(wrapped, enabled=rtl and contains_arabic(wrapped))
 
 
+# علامات ترقيم عربية لا يجوز بقاؤها في أسماء الملفات (داخل نطاق العربية)
+_ARABIC_PUNCT = "،؛؟٪«»ـٰ۔٫٬"
+
+
 def slugify(text: str, max_len: int = 60, fallback: str = "clip") -> str:
     """اسم ملف آمن: يبقي على العربية واللاتينية والأرقام فقط."""
     text = normalize_text(text)
     out = []
     for ch in text:
-        if ch.isalnum() or is_arabic_char(ch):
+        if ch in _ARABIC_PUNCT:
+            out.append("-")
+        elif ch.isalnum() or is_arabic_char(ch):
             out.append(ch)
         elif ch in " -_.":
             out.append("-")
