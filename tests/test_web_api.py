@@ -162,3 +162,36 @@ class TestSuggestUi:
         text = client.get("/").text
         for engine in ("heuristic", "hybrid", "llm"):
             assert engine in text
+
+
+class TestMemoryBounds:
+    """الذاكرة لا تنمو بلا حد في الجلسات الطويلة."""
+
+    def test_jobs_are_capped(self):
+        import ui.server as server
+
+        server.JOBS.clear()
+        for i in range(server.MAX_JOBS + 25):
+            server.JOBS[f"job{i}"] = server.Job(id=f"job{i}")
+            server._prune(server.JOBS, server.MAX_JOBS)
+        assert len(server.JOBS) == server.MAX_JOBS
+
+    def test_newest_job_survives_pruning(self):
+        import ui.server as server
+
+        server.JOBS.clear()
+        for i in range(server.MAX_JOBS + 5):
+            server.JOBS[f"job{i}"] = server.Job(id=f"job{i}")
+            server._prune(server.JOBS, server.MAX_JOBS)
+        last = f"job{server.MAX_JOBS + 4}"
+        assert last in server.JOBS
+        assert "job0" not in server.JOBS
+
+    def test_analyses_are_capped(self):
+        import ui.server as server
+
+        server.ANALYSES.clear()
+        for i in range(server.MAX_ANALYSES + 15):
+            server.ANALYSES[f"a{i}"] = object()
+            server._prune(server.ANALYSES, server.MAX_ANALYSES)
+        assert len(server.ANALYSES) == server.MAX_ANALYSES

@@ -80,6 +80,17 @@ JOBS: Dict[str, Job] = {}
 # نتائج التحليل محفوظة بالذاكرة ليتمكّن المستخدم من اختيار ما يُنتَج
 ANALYSES: Dict[str, Any] = {}
 
+# كل SuggestionSet يحمل ترانسكربتاً كاملاً، وكل Job يحمل سجل أحداثه.
+# بلا سقف تنمو الذاكرة بلا حد في الجلسات الطويلة — نُبقي الأحدث فقط.
+MAX_JOBS = 40
+MAX_ANALYSES = 10
+
+
+def _prune(store: Dict[str, Any], limit: int) -> None:
+    """يحذف الأقدم عند تجاوز السقف (الإدراج في dict مرتّب زمنياً)."""
+    while len(store) > limit:
+        store.pop(next(iter(store)), None)
+
 
 # ============================================================ النماذج
 
@@ -230,6 +241,7 @@ def create_clip(payload: ClipPayload) -> Dict[str, str]:
         raise HTTPException(status_code=400, detail="حدّد رابطاً أو مسار ملف.")
     job = Job(id=uuid.uuid4().hex[:12], source=payload.source)
     JOBS[job.id] = job
+    _prune(JOBS, MAX_JOBS)
     threading.Thread(target=_run_job, args=(job, payload), daemon=True).start()
     return {"job_id": job.id}
 
@@ -299,6 +311,7 @@ def _run_suggest(job: Job, payload: SuggestPayload) -> None:
         )
 
         ANALYSES[job.id] = result
+        _prune(ANALYSES, MAX_ANALYSES)
         job.results = [s.to_dict() for s in result.suggestions]
         job.status = "done"
 
@@ -329,6 +342,7 @@ def create_suggestion(payload: SuggestPayload) -> Dict[str, str]:
         raise HTTPException(status_code=400, detail="حدّد رابطاً أو مسار ملف.")
     job = Job(id=uuid.uuid4().hex[:12], source=payload.source)
     JOBS[job.id] = job
+    _prune(JOBS, MAX_JOBS)
     threading.Thread(target=_run_suggest, args=(job, payload), daemon=True).start()
     return {"job_id": job.id}
 
@@ -398,6 +412,7 @@ def produce_from_analysis(payload: ProducePayload) -> Dict[str, str]:
         )
     job = Job(id=uuid.uuid4().hex[:12], source=analysis.source.path)
     JOBS[job.id] = job
+    _prune(JOBS, MAX_JOBS)
     threading.Thread(target=_run_produce, args=(job, payload, analysis), daemon=True).start()
     return {"job_id": job.id}
 
