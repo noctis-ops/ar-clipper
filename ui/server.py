@@ -34,6 +34,7 @@ from core.common.schemas import ClipRequest
 from core.common.text_utils import human_duration, parse_timestamp
 from core.ingest.licensing import describe_presets
 from core.pipeline import PipelineOptions, run_pipeline
+from core.design.templates import apply_template, get_template, load_templates
 from core.presets import apply_preset_to_settings, get_preset, load_presets
 
 log = get_logger(__name__)
@@ -102,6 +103,11 @@ class ClipPayload(BaseModel):
     preset: str = "campaign"
     license_key: str = "personal_test"
     name: Optional[str] = None
+    # المرحلة 3
+    template: str = ""
+    face_track: bool = False
+    animated_subs: bool = False
+    hook: str = ""
 
 
 class ProbePayload(BaseModel):
@@ -146,6 +152,10 @@ def options() -> Dict[str, Any]:
             for k, p in load_presets().items()
         ],
         "licenses": describe_presets(),
+        "templates": [
+            {"key": k, "label": t.label, "description": t.description}
+            for k, t in load_templates(settings).items()
+        ],
         "defaults": {
             "license_mode": settings.get("ingest.license_mode", "default"),
             "default_license": settings.get("ingest.default_license", "personal_test"),
@@ -187,6 +197,17 @@ def _run_job(job: Job, payload: ClipPayload) -> None:
         chosen = get_preset(payload.preset)
         apply_preset_to_settings(chosen, settings)
 
+        # المرحلة 3: القالب أولاً ثم تتجاوزه المفاتيح الصريحة
+        if getattr(payload, "template", ""):
+            try:
+                apply_template(get_template(payload.template, settings), settings)
+            except ArClipperError as exc:
+                log.warning("قالب غير صالح (%s) — سيُتجاهل.", exc)
+        if getattr(payload, "face_track", False):
+            settings.data.setdefault("reframe", {})["mode"] = "face_track"
+        if getattr(payload, "animated_subs", False):
+            settings.data.setdefault("subtitles", {})["animated"] = True
+
         options = PipelineOptions(license_note=payload.license_key)
         for key, value in chosen.options.items():
             if hasattr(options, key):
@@ -198,7 +219,9 @@ def _run_job(job: Job, payload: ClipPayload) -> None:
 
         requests = [
             ClipRequest(
-                start=parse_timestamp(payload.start), end=parse_timestamp(payload.end)
+                start=parse_timestamp(payload.start),
+                end=parse_timestamp(payload.end),
+                hook=getattr(payload, "hook", "") or None,
             )
         ]
 
@@ -221,6 +244,8 @@ def _run_job(job: Job, payload: ClipPayload) -> None:
                     "height": r.height,
                     "subtitles": r.subtitle_files,
                     "stages": r.stages,
+                    # المرحلة 3: الصورة المصغّرة المولَّدة تلقائياً
+                    "thumbnail_path": r.thumbnail_path,
                 }
             )
         job.status = "done"
@@ -389,6 +414,8 @@ def _run_produce(job: Job, payload: ProducePayload, analysis: Any) -> None:
                     "height": r.height,
                     "subtitles": r.subtitle_files,
                     "stages": r.stages,
+                    # المرحلة 3: الصورة المصغّرة المولَّدة تلقائياً
+                    "thumbnail_path": r.thumbnail_path,
                 }
             )
         job.status = "done"

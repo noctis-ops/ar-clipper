@@ -64,6 +64,11 @@
     padding:12px; margin-bottom:10px; display:flex; gap:10px; align-items:flex-start;
   }
   .sug.pick{border-color:var(--accent2); background:#16233a}
+  .thumb{margin:10px 0}
+  .thumb summary{cursor:pointer; font-weight:600; padding:6px 0}
+  .thumb img{width:100%; max-width:220px; border-radius:8px; margin:8px 0; display:block}
+  .chk{display:flex; align-items:center; gap:8px; margin:10px 0; cursor:pointer; font-weight:500}
+  .chk input[type=checkbox]{width:18px; height:18px; flex:none; cursor:pointer; margin:0}
   .sug input[type=checkbox]{width:18px; height:18px; margin-top:3px; flex:none; cursor:pointer}
   .sug .body{flex:1; min-width:0}
   .sug .ttl{font-weight:600; font-size:14px; margin-bottom:4px; line-height:1.5}
@@ -166,6 +171,20 @@
         <select id="preset"></select>
         <div class="hint" id="presetDesc"></div>
 
+        <label>قالب التصميم <span class="hint" style="display:inline">(المرحلة 3)</span></label>
+        <select id="template"></select>
+        <div class="hint" id="tplDesc"></div>
+
+        <label>نص الصورة المصغّرة</label>
+        <input id="hook" placeholder="اترك فارغاً لصورة بلا نص" />
+
+        <label class="chk">
+          <input type="checkbox" id="faceTrack" /> 🎯 تتبّع وجه المتحدث
+        </label>
+        <label class="chk">
+          <input type="checkbox" id="animatedSubs" /> ✨ ترجمة متحركة (كاريوكي)
+        </label>
+
         <label>أساس الاستخدام</label>
         <select id="license"></select>
         <div class="hint" id="licDesc"></div>
@@ -198,7 +217,7 @@
 
 <script>
 const $ = id => document.getElementById(id);
-let PRESETS = [], LICENSES = [];
+let PRESETS = [], LICENSES = [], TEMPLATES = [];
 let MODE = 'manual';          // manual | auto
 let ANALYSIS = null;          // job_id لنتيجة التحليل الحالية
 let SUGGESTIONS = [];
@@ -206,7 +225,14 @@ let SUGGESTIONS = [];
 async function init(){
   const r = await fetch('/api/options');
   const data = await r.json();
-  PRESETS = data.presets; LICENSES = data.licenses;
+  PRESETS = data.presets; LICENSES = data.licenses; TEMPLATES = data.templates || [];
+
+  $('template').innerHTML = '<option value="">(الافتراضي)</option>' +
+    TEMPLATES.map(t => `<option value="${t.key}">${t.label}</option>`).join('');
+  $('template').onchange = () => {
+    const t = TEMPLATES.find(x => x.key === $('template').value);
+    $('tplDesc').textContent = t ? t.description : '';
+  };
 
   $('preset').innerHTML = PRESETS.map(p =>
     `<option value="${p.key}">${p.label}</option>`).join('');
@@ -291,6 +317,10 @@ $('go').onclick = async () => {
     start: $('start').value.trim(),
     end: $('end').value.trim(),
     preset: $('preset').value,
+    template: $('template').value,
+    face_track: $('faceTrack').checked,
+    animated_subs: $('animatedSubs').checked,
+    hook: $('hook').value.trim(),
     license_key: $('license').value
   };
 
@@ -463,13 +493,25 @@ async function finish(jobId, payload){
         <span class="tag">${res.width}×${res.height}</span>
         <span class="tag">${res.duration_human}</span>
         ${Object.keys(res.subtitles).map(f=>`<span class="tag">.${f}</span>`).join('')}
+        ${(res.stages||[]).includes('branding') ? '<span class="tag">🎨 هوية</span>' : ''}
+        ${(res.stages||[]).includes('thumbnail') ? '<span class="tag">🖼️ مصغّرة</span>' : ''}
       </div>
+      ${res.thumbnail_path ? `
+      <details class="thumb">
+        <summary>🖼️ الصورة المصغّرة</summary>
+        <img src="/api/file?path=${encodeURIComponent(res.thumbnail_path)}" alt="الصورة المصغّرة" />
+        <div class="cmd">${res.thumbnail_path}</div>
+      </details>` : ''}
       <div class="cmd">${res.video_path}</div>
     </div>
   `).join('') + (payload ? `
     <div class="cmd">💡 نفس النتيجة من الطرفية:<br>
 ar-clipper clip "${payload.source}" --preset ${payload.preset} \\
-  -s ${payload.start} -e ${payload.end} -L ${payload.license_key}</div>` : `
+  -s ${payload.start} -e ${payload.end} -L ${payload.license_key}${
+    payload.template ? ` \\\n  -T ${payload.template}` : ''}${
+    payload.face_track ? ' --face-track' : ''}${
+    payload.animated_subs ? ' --animated-subs' : ''}${
+    payload.hook ? ` --hook "${payload.hook}"` : ''}</div>` : `
     <div class="cmd">💡 نفس النتيجة من الطرفية:<br>
 ar-clipper suggest "${$('source').value.trim()}" --produce</div>`);
   $('resultCard').style.display = 'block';

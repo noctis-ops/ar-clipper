@@ -714,3 +714,57 @@ class TestSettingsIsolation:
 
         source = Path("ui/server.py").read_text(encoding="utf-8")
         assert source.count("load_settings().clone()") >= 3
+
+
+class TestWebUiPhase3:
+    """ميزات المرحلة 3 متاحة في الواجهة، لا في CLI وحده."""
+
+    @pytest.fixture
+    @staticmethod
+    def client():
+        from fastapi.testclient import TestClient
+
+        from ui.server import app
+
+        return TestClient(app)
+
+    def test_options_expose_templates(self, client):
+        data = client.get("/api/options").json()
+        assert "templates" in data
+        keys = {t["key"] for t in data["templates"]}
+        assert "karaoke_pop" in keys
+
+    def test_clip_payload_accepts_phase3_fields(self):
+        from ui.server import ClipPayload
+
+        payload = ClipPayload(
+            source="/x.mp4",
+            template="news",
+            face_track=True,
+            animated_subs=True,
+            hook="نص",
+        )
+        assert payload.template == "news"
+        assert payload.face_track is True
+
+    def test_payload_defaults_are_off(self):
+        """الميزات الجديدة لا تُفرض على من لم يطلبها."""
+        from ui.server import ClipPayload
+
+        payload = ClipPayload(source="/x.mp4")
+        assert payload.face_track is False
+        assert payload.animated_subs is False
+        assert payload.template == ""
+
+    def test_html_exposes_phase3_controls(self):
+        from pathlib import Path
+
+        html = Path("ui/static/index.html").read_text(encoding="utf-8")
+        for element in ("faceTrack", "animatedSubs", "template", "hook"):
+            assert f'id="{element}"' in html, f"عنصر {element} مفقود من الواجهة"
+
+    def test_results_include_thumbnail(self):
+        from pathlib import Path
+
+        source = Path("ui/server.py").read_text(encoding="utf-8")
+        assert source.count('"thumbnail_path": r.thumbnail_path') >= 2
