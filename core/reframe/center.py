@@ -94,6 +94,8 @@ def _build_face_track_filter(
     from .face_track import (
         average_focus,
         build_dynamic_crop,
+        build_split_screen_filter,
+        detect_dialogue,
         smooth_track,
         track_faces,
         track_spread,
@@ -113,6 +115,26 @@ def _build_face_track_filter(
             min_rate * 100,
         )
         return "", "قص مركزي — لا وجه واضح"
+
+    # حوار بين متحدثَين: تتبّع وجه واحد يقطع الآخر تماماً، والقص المركزي
+    # يقطع الاثنين. الشاشة المنقسمة تُظهرهما معاً.
+    if settings.get("reframe.split_screen", True):
+        layout = detect_dialogue(
+            tracked.samples,
+            min_ratio=float(settings.get("reframe.dialogue_min_ratio", 0.4)),
+            min_gap=float(settings.get("reframe.dialogue_min_gap", 0.25)),
+        )
+        if layout.usable:
+            return (
+                build_split_screen_filter(
+                    layout,
+                    src_w=info.width,
+                    src_h=info.height,
+                    out_w=out_w,
+                    out_h=out_h,
+                ),
+                f"شاشة منقسمة — متحدثان (ثقة {layout.confidence:.0%})",
+            )
 
     samples = smooth_track(
         tracked.samples,

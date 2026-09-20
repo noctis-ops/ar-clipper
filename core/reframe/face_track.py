@@ -36,6 +36,8 @@ class FaceSample:
     center_x: float  # 0..1 نسبةً لعرض الإطار
     center_y: float  # 0..1 نسبةً لارتفاع الإطار
     size: float = 0.0  # عرض الوجه نسبةً لعرض الإطار (مؤشر ثقة/قرب)
+    # كل الوجوه في هذا الإطار: [(x, y, size)] — لاكتشاف الحوار الثنائي
+    all_faces: List[tuple] = field(default_factory=list)
 
 
 @dataclass
@@ -97,6 +99,11 @@ def _detect_opencv(frames: Sequence[Tuple[float, "object"]], min_size_ratio: flo
                 center_x=(x + w / 2) / width,
                 center_y=(y + h / 2) / height,
                 size=w / width,
+                # كل الوجوه المكتشفة — تُستخدم لتخطيط الشاشة المنقسمة
+                all_faces=[
+                    ((fx + fw / 2) / width, (fy + fh / 2) / height, fw / width)
+                    for fx, fy, fw, fh in faces
+                ],
             )
         )
     return samples
@@ -127,6 +134,14 @@ def track_faces(
     """
     settings = settings or load_settings()
     result = TrackResult()
+
+    # مسار التتبّع مكلف (~2.6s) ويتكرّر حرفياً عند إعادة إنتاج نفس المقطع
+    # بقالب مختلف (--variants). التخزين المؤقت يُسقط هذه الكلفة تماماً.
+    cache_file = _cache_path(video_path, settings)
+    cached = _load_cache(cache_file, video_path)
+    if cached is not None:
+        log.info("مسار الوجه من الذاكرة المؤقتة (%d عيّنة).", len(cached.samples))
+        return cached
 
     try:
         import cv2
@@ -191,7 +206,87 @@ def track_faces(
         result.frames_scanned,
         result.detection_rate * 100,
     )
+    _save_cache(cache_file, video_path, result)
     return result
+
+
+# ============================================================ التخزين المؤقت
+
+
+def _cache_path(video_path: str | Path, settings: Settings) -> Optional[Path]:
+    """مسار ملف الكاش المبني على بصمة الفيديو."""
+    if not settings.get("reframe.cache_tracks", True):
+        return None
+    try:
+        source = Path(video_path)
+        stat = source.stat()
+        import hashlib
+
+        key = hashlib.sha1(
+            f"{source.resolve()}|{stat.st_size}|{int(stat.st_mtime)}|"
+            f"{settings.get('reframe.sample_fps')}|{settings.get('reframe.face_engine')}"
+            "".encode("utf-8")
+        ).hexdigest()[:16]
+        directory = settings.path("paths.tmp") / "face_tracks"
+        directory.mkdir(parents=True, exist_ok=True)
+        return directory / f"{key}.json"
+    except (OSError, ValueError):
+        return None
+
+
+def _load_cache(path: Optional[Path], video_path: str | Path) -> Optional[TrackResult]:
+    if not path or not path.exists():
+        return None
+    try:
+        import json
+
+        data = json.loads(path.read_text(encoding="utf-8"))
+        result = TrackResult(
+            frames_scanned=int(data["frames_scanned"]),
+            engine=str(data["engine"]),
+        )
+        result.samples = [
+            FaceSample(
+                time=float(s["t"]),
+                center_x=float(s["x"]),
+                center_y=float(s["y"]),
+                size=float(s.get("s", 0.0)),
+                all_faces=[tuple(f) for f in s.get("all", [])],
+            )
+            for s in data["samples"]
+        ]
+        return result
+    except (OSError, ValueError, KeyError):
+        return None  # كاش تالف يُتجاهل بصمت ويُعاد التتبّع
+
+
+def _save_cache(path: Optional[Path], video_path: str | Path, result: TrackResult) -> None:
+    if not path or not result.found:
+        return
+    try:
+        import json
+
+        path.write_text(
+            json.dumps(
+                {
+                    "engine": result.engine,
+                    "frames_scanned": result.frames_scanned,
+                    "samples": [
+                        {
+                            "t": round(s.time, 3),
+                            "x": round(s.center_x, 5),
+                            "y": round(s.center_y, 5),
+                            "s": round(s.size, 5),
+                            "all": [[round(v, 5) for v in f] for f in s.all_faces],
+                        }
+                        for s in result.samples
+                    ],
+                }
+            ),
+            encoding="utf-8",
+        )
+    except OSError:  # pragma: no cover
+        pass
 
 
 # ============================================================ التنعيم
@@ -317,3 +412,122 @@ def build_dynamic_crop(
     y_center = sum(s.center_y for s in samples) / len(samples)
     y = max(0, min(max_y, int(round(y_center * src_h - crop_h / 2))))
     return f"crop={crop_w}:{crop_h}:'{expr}':{y}"
+
+
+# ============================================================ الحوار الثنائي
+
+
+@dataclass
+class DialogueLayout:
+    """تخطيط حوار بين متحدثَين: نافذتا قص مكدّستان رأسياً."""
+
+    top: Tuple[float, float] = (0.0, 0.0)  # (مركز أفقي، مركز رأسي) للوجه العلوي
+    bottom: Tuple[float, float] = (0.0, 0.0)
+    confidence: float = 0.0
+    # متوسط عرض الوجه نسبةً لعرض الإطار — يحدّد قوة التقريب
+    face_size: float = 0.0
+
+    @property
+    def usable(self) -> bool:
+        return self.confidence >= 0.5
+
+
+def detect_dialogue(
+    samples: Sequence[FaceSample], *, min_ratio: float = 0.4, min_gap: float = 0.25
+) -> DialogueLayout:
+    """يكتشف وجود متحدثَين ثابتين على جانبَي الكادر.
+
+    الحالة الأصعب في البودكاست: شخصان على اليمين واليسار. تتبّع وجه واحد يعني
+    قطع الآخر تماماً، والقص المركزي يقطع الاثنين. الحل: شاشة منقسمة رأسياً.
+
+    ``min_ratio`` = النسبة الدنيا من العيّنات التي يجب أن تُظهر وجهَين.
+    ``min_gap``   = المسافة الأفقية الدنيا بينهما (وإلا فهما وجه واحد مكرّر).
+    """
+    layout = DialogueLayout()
+    if not samples:
+        return layout
+
+    pairs: List[Tuple[Tuple[float, float], Tuple[float, float]]] = []
+    sizes: List[float] = []
+    for sample in samples:
+        faces = sorted(sample.all_faces or [], key=lambda f: -f[2])[:2]
+        if len(faces) < 2:
+            continue
+        left, right = sorted(faces[:2], key=lambda f: f[0])
+        if (right[0] - left[0]) < min_gap:
+            continue
+        pairs.append(((left[0], left[1]), (right[0], right[1])))
+        sizes.append((left[2] + right[2]) / 2)
+
+    layout.confidence = len(pairs) / len(samples)
+    if not pairs or layout.confidence < min_ratio:
+        return layout
+
+    layout.top = (
+        sum(p[0][0] for p in pairs) / len(pairs),
+        sum(p[0][1] for p in pairs) / len(pairs),
+    )
+    layout.bottom = (
+        sum(p[1][0] for p in pairs) / len(pairs),
+        sum(p[1][1] for p in pairs) / len(pairs),
+    )
+    layout.face_size = sum(sizes) / len(sizes) if sizes else 0.0
+    log.info(
+        "حوار ثنائي مكتشف (ثقة %.0f%%): وجهان عند %.2f و%.2f.",
+        layout.confidence * 100,
+        layout.top[0],
+        layout.bottom[0],
+    )
+    return layout
+
+
+def build_split_screen_filter(
+    layout: DialogueLayout,
+    *,
+    src_w: int,
+    src_h: int,
+    out_w: int,
+    out_h: int,
+    zoom: float = 3.2,
+) -> str:
+    """يبني فلتر شاشة منقسمة: كل متحدث في نصف رأسي.
+
+    **حجم النافذة يتبع حجم الوجه، لا ارتفاع المصدر.** لو أخذنا الارتفاع كاملاً
+    لخرجت نافذة عريضة جداً يظهر فيها الوجه صغيراً وسط فراغ. نضبط عرض النافذة
+    ليساوي ``zoom`` أضعاف عرض الوجه، فيملأ الوجه النصف بشكل طبيعي.
+    """
+    half_h = out_h // 2
+    pane_aspect = out_w / half_h
+
+    face_w = max(0.04, layout.face_size or 0.18)
+    crop_w = int(round(face_w * zoom * src_w))
+    crop_h = int(round(crop_w / pane_aspect))
+
+    # التقييد داخل حدود المصدر مع الحفاظ على النسبة
+    if crop_h > src_h:
+        crop_h = src_h
+        crop_w = int(round(crop_h * pane_aspect))
+    if crop_w > src_w:
+        crop_w = src_w
+        crop_h = int(round(crop_w / pane_aspect))
+
+    crop_w = max(16, crop_w - (crop_w % 2))
+    crop_h = max(16, crop_h - (crop_h % 2))
+
+    def _pane(center: Tuple[float, float], label: str) -> str:
+        x = int(round(center[0] * src_w - crop_w / 2))
+        x = max(0, min(src_w - crop_w, x))
+        x -= x % 2
+        y = int(round(center[1] * src_h - crop_h / 2))
+        y = max(0, min(src_h - crop_h, y))
+        y -= y % 2
+        return (
+            f"[0:v]crop={crop_w}:{crop_h}:{x}:{y},"
+            f"scale={out_w}:{half_h}:flags=lanczos,setsar=1[{label}]"
+        )
+
+    return (
+        f"{_pane(layout.top, 'sp0')};"
+        f"{_pane(layout.bottom, 'sp1')};"
+        f"[sp0][sp1]vstack=inputs=2"
+    )

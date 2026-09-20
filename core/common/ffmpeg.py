@@ -372,9 +372,16 @@ def apply_filters(
     for extra in extra_inputs:
         args += ["-i", str(extra)]
 
-    if extra_inputs and video_filter:
-        # سلسلة الفيديو تبدأ من [0:v] وتنتهي بمخرج مُسمّى نختاره صراحةً
-        args += ["-filter_complex", video_filter, "-map", "[vout]", "-map", "0:a?"]
+    # الرسم البياني المعقّد (مدخلات إضافية أو سلاسل مُسمّاة مثل vstack)
+    # يحتاج -filter_complex لا -vf.
+    is_complex = bool(video_filter) and (
+        bool(extra_inputs) or ";" in video_filter or "[0:v]" in video_filter
+    )
+    if is_complex:
+        args += ["-filter_complex", video_filter]
+        # مخرج مُسمّى صراحةً إن وُجد، وإلا يكفي ffmpeg باستنتاجه
+        if "[vout]" in video_filter:
+            args += ["-map", "[vout]", "-map", "0:a?"]
         if audio_filter:
             args += ["-af", audio_filter]
     else:

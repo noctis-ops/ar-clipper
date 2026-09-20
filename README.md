@@ -271,7 +271,7 @@ core/
 ## 🧪 الاختبارات
 
 ```bash
-pytest                 # 441 اختباراً
+pytest                 # 459 اختباراً
 pytest -m "not slow"   # وحدة فقط (أقل من ثانية، بلا ffmpeg)
 pytest -m slow         # تكامل حقيقي مع ffmpeg (~65 ثانية)
 

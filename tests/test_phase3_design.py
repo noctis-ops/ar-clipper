@@ -768,3 +768,215 @@ class TestWebUiPhase3:
 
         source = Path("ui/server.py").read_text(encoding="utf-8")
         assert source.count('"thumbnail_path": r.thumbnail_path') >= 2
+
+
+# ============================================================ تحسينات ما بعد التقييم
+
+
+class TestDialogueDetection:
+    """الحوار الثنائي — أصعب حالة في البودكاست."""
+
+    def _samples(self, faces_per_frame, count=20):
+        from core.reframe.face_track import FaceSample
+
+        return [
+            FaceSample(
+                time=i * 0.3,
+                center_x=faces_per_frame[0][0],
+                center_y=faces_per_frame[0][1],
+                all_faces=list(faces_per_frame),
+            )
+            for i in range(count)
+        ]
+
+    def test_detects_two_speakers(self):
+        from core.reframe.face_track import detect_dialogue
+
+        layout = detect_dialogue(
+            self._samples([(0.25, 0.45, 0.18), (0.75, 0.45, 0.17)])
+        )
+        assert layout.usable
+        assert layout.top[0] == pytest.approx(0.25, abs=0.01)
+        assert layout.bottom[0] == pytest.approx(0.75, abs=0.01)
+
+    def test_single_speaker_is_not_dialogue(self):
+        from core.reframe.face_track import detect_dialogue
+
+        assert detect_dialogue(self._samples([(0.5, 0.4, 0.2)])).usable is False
+
+    def test_two_close_faces_are_not_dialogue(self):
+        """وجهان متلاصقان = كشف مكرّر لنفس الشخص، لا حوار."""
+        from core.reframe.face_track import detect_dialogue
+
+        layout = detect_dialogue(self._samples([(0.48, 0.4, 0.2), (0.55, 0.4, 0.19)]))
+        assert layout.usable is False
+
+    def test_occasional_second_face_is_not_dialogue(self):
+        """ظهور عابر لوجه ثانٍ لا يبرّر شاشة منقسمة للمقطع كله."""
+        from core.reframe.face_track import FaceSample, detect_dialogue
+
+        samples = [
+            FaceSample(time=i * 0.3, center_x=0.3, center_y=0.4, all_faces=[(0.3, 0.4, 0.2)])
+            for i in range(18)
+        ] + [
+            FaceSample(
+                time=(18 + i) * 0.3,
+                center_x=0.3,
+                center_y=0.4,
+                all_faces=[(0.25, 0.4, 0.2), (0.8, 0.4, 0.18)],
+            )
+            for i in range(2)
+        ]
+        assert detect_dialogue(samples).usable is False
+
+    def test_empty_samples_safe(self):
+        from core.reframe.face_track import detect_dialogue
+
+        assert detect_dialogue([]).usable is False
+
+    def test_face_size_is_recorded(self):
+        from core.reframe.face_track import detect_dialogue
+
+        layout = detect_dialogue(self._samples([(0.2, 0.4, 0.20), (0.8, 0.4, 0.16)]))
+        assert layout.face_size == pytest.approx(0.18, abs=0.01)
+
+
+class TestSplitScreenFilter:
+    def _layout(self, face_size=0.18):
+        from core.reframe.face_track import DialogueLayout
+
+        return DialogueLayout(
+            top=(0.25, 0.45), bottom=(0.75, 0.45), confidence=1.0, face_size=face_size
+        )
+
+    def test_builds_vstack_of_two_panes(self):
+        from core.reframe.face_track import build_split_screen_filter
+
+        f = build_split_screen_filter(
+            self._layout(), src_w=1280, src_h=720, out_w=1080, out_h=1920
+        )
+        assert f.count("crop=") == 2
+        assert "vstack=inputs=2" in f
+        assert "[sp0][sp1]" in f
+
+    def test_panes_scale_to_half_height(self):
+        from core.reframe.face_track import build_split_screen_filter
+
+        f = build_split_screen_filter(
+            self._layout(), src_w=1280, src_h=720, out_w=1080, out_h=1920
+        )
+        assert f.count("scale=1080:960") == 2
+
+    def test_window_follows_face_size(self):
+        """وجه صغير ⇒ نافذة أضيق (تقريب أقوى) — وإلا ظهر تائهاً في الفراغ."""
+        import re
+
+        from core.reframe.face_track import build_split_screen_filter
+
+        def crop_width(size):
+            f = build_split_screen_filter(
+                self._layout(size), src_w=1920, src_h=1080, out_w=1080, out_h=1920
+            )
+            return int(re.search(r"crop=(\d+):", f).group(1))
+
+        assert crop_width(0.10) < crop_width(0.25)
+
+    def test_crop_never_exceeds_source(self):
+        import re
+
+        from core.reframe.face_track import build_split_screen_filter
+
+        f = build_split_screen_filter(
+            self._layout(0.9), src_w=1280, src_h=720, out_w=1080, out_h=1920
+        )
+        for w, h in re.findall(r"crop=(\d+):(\d+):", f):
+            assert int(w) <= 1280 and int(h) <= 720
+
+    def test_dimensions_are_even(self):
+        """أبعاد فردية تكسر yuv420p."""
+        import re
+
+        from core.reframe.face_track import build_split_screen_filter
+
+        f = build_split_screen_filter(
+            self._layout(0.137), src_w=1281, src_h=721, out_w=1080, out_h=1920
+        )
+        for value in re.findall(r"crop=(\d+):(\d+):(\d+):(\d+)", f)[0]:
+            assert int(value) % 2 == 0
+
+
+class TestTrackCache:
+    """التتبّع مكلف ويتكرّر حرفياً مع --variants."""
+
+    def test_cache_round_trip(self, tmp_path):
+        from core.reframe.face_track import (
+            FaceSample,
+            TrackResult,
+            _load_cache,
+            _save_cache,
+        )
+
+        original = TrackResult(frames_scanned=10, engine="opencv")
+        original.samples = [
+            FaceSample(time=0.3, center_x=0.4, center_y=0.5, size=0.2,
+                       all_faces=[(0.4, 0.5, 0.2)])
+        ]
+        path = tmp_path / "c.json"
+        _save_cache(path, "v.mp4", original)
+        restored = _load_cache(path, "v.mp4")
+        assert restored is not None
+        assert restored.samples[0].center_x == pytest.approx(0.4)
+        assert restored.samples[0].all_faces == [(0.4, 0.5, 0.2)]
+
+    def test_corrupt_cache_is_ignored(self, tmp_path):
+        from core.reframe.face_track import _load_cache
+
+        path = tmp_path / "bad.json"
+        path.write_text("ليس JSON", encoding="utf-8")
+        assert _load_cache(path, "v.mp4") is None
+
+    def test_missing_cache_returns_none(self, tmp_path):
+        from core.reframe.face_track import _load_cache
+
+        assert _load_cache(tmp_path / "لا-يوجد.json", "v.mp4") is None
+
+    def test_empty_result_is_not_cached(self, tmp_path):
+        """نتيجة فارغة قد تعني عطلاً مؤقتاً — لا تُثبَّت في الكاش."""
+        from core.reframe.face_track import TrackResult, _save_cache
+
+        path = tmp_path / "e.json"
+        _save_cache(path, "v.mp4", TrackResult())
+        assert not path.exists()
+
+    def test_cache_can_be_disabled(self, tmp_path):
+        from core.reframe.face_track import _cache_path
+
+        settings = load_settings()
+        settings.data["reframe"]["cache_tracks"] = False
+        assert _cache_path("/x.mp4", settings) is None
+
+    def test_cache_key_changes_with_settings(self, tmp_path):
+        """تغيير معدّل العيّنات يجب أن يُبطل الكاش."""
+        from core.reframe.face_track import _cache_path
+
+        video = tmp_path / "v.mp4"
+        video.write_bytes(b"data")
+        first = load_settings()
+        first.data["paths"]["tmp"] = str(tmp_path)
+        second = load_settings()
+        second.data["paths"]["tmp"] = str(tmp_path)
+        second.data["reframe"]["sample_fps"] = 9.0
+        assert _cache_path(video, first) != _cache_path(video, second)
+
+
+class TestComplexFilterRouting:
+    """الرسم البياني المُسمّى يحتاج -filter_complex لا -vf."""
+
+    def test_named_chains_use_filter_complex(self):
+        import inspect
+
+        from core.common.ffmpeg import apply_filters
+
+        source = inspect.getsource(apply_filters)
+        assert "is_complex" in source
+        assert '";" in video_filter' in source
