@@ -67,6 +67,22 @@ reframe:
   focus_x: 0.5
   focus_y: 0.5
 
+  # --- تتبّع الوجه (المرحلة 3) — يعمل فقط عندما mode: face_track ---
+  # opencv = Haar المرفق مع الحزمة، بلا تنزيل ولا شبكة (موصى به)
+  face_engine: opencv
+  # عدد العيّنات في الثانية: الوجه لا يقفز 25 مرة/ث، والمسح الكامل هدر
+  sample_fps: 3.0
+  # أصغر وجه معتبر، نسبةً لعرض الإطار (يمنع الكشف الخاطئ على التفاصيل)
+  min_face_ratio: 0.05
+  # إن كُشف وجه في أقل من هذه النسبة من العيّنات → تراجع للقص المركزي
+  min_detection_rate: 0.25
+  # نافذة المتوسط المتحرك لإزالة الرجفة
+  smooth_window: 5
+  # أقصى إزاحة أفقية مسموحة بين عيّنتين (يمنع قفز الكاميرا)
+  max_step: 0.04
+  # إن كان انتشار المسار أقل من هذا → قص ثابت على مركز الثقل بدل تعبير متحرك
+  static_threshold: 0.04
+
 subtitles:
   enabled: true
   burn: true
@@ -75,6 +91,8 @@ subtitles:
   font_name: DejaVu Sans
   font_size: 54
   primary_color: "#FFFFFF"
+  # لون الكلمات قبل نطقها في وضع الكاريوكي (رمادي هادئ، لا أحمر صارخ)
+  secondary_color: "#9AA0A6"
   outline_color: "#000000"
   back_color: "#A0000000"
   outline: 3
@@ -85,6 +103,19 @@ subtitles:
   max_line_chars: 38
   max_lines: 2
   rtl: true
+
+  # --- ترجمة متحركة (المرحلة 3) ---
+  # تلوّن الكلمة أثناء نطقها (كاريوكي) وتُبرز الكلمات المهمة
+  animated: false
+  highlight_keywords: true
+  highlight_color: "#FFD700"
+  # نسبة الكلمات التي تُبرَز من مجموع الكلمات المؤهلة
+  keyword_ratio: 0.25
+  keyword_min_len: 4
+  # مدة الظهور/الاختفاء الناعم للسطر (ميلي ثانية)
+  fade_ms: 120
+  # تكبير خفيف عند ظهور السطر
+  pop_in: true
 
 export:
   video_codec: libx264

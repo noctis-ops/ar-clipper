@@ -150,6 +150,11 @@ def build_ass_style(style_cfg: Dict, *, play_res_x: int, play_res_y: int) -> str
     primary = hex_to_ass_color(style_cfg.get("primary_color", "#FFFFFF"), "&H00FFFFFF")
     outline_c = hex_to_ass_color(style_cfg.get("outline_color", "#000000"), "&H00000000")
     back_c = hex_to_ass_color(style_cfg.get("back_color", "#A0000000"), "&H80000000")
+    # SecondaryColour = لون الكلمات التي لم تُنطق بعد في وضع الكاريوكي.
+    # الافتراضي في ASS أحمر صارخ؛ نجعله رمادياً هادئاً حتى يبرز المنطوق بالتباين.
+    secondary = hex_to_ass_color(
+        style_cfg.get("secondary_color", "#9AA0A6"), "&H00A0A09A"
+    )
     outline = float(style_cfg.get("outline", 3))
     shadow = float(style_cfg.get("shadow", 1))
     bold = -1 if style_cfg.get("bold", True) else 0
@@ -172,13 +177,69 @@ def build_ass_style(style_cfg: Dict, *, play_res_x: int, play_res_y: int) -> str
             "BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, "
             "BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding",
             # Encoding=1 (Default) يعمل بشكل صحيح مع libass للعربية عبر HarfBuzz
-            f"Style: Default,{font},{size},{primary},&H000000FF,{outline_c},{back_c},"
+            f"Style: Default,{font},{size},{primary},{secondary},{outline_c},{back_c},"
             f"{bold},0,0,0,100,100,0,0,1,{outline},{shadow},2,{margin_h},{margin_h},{margin_v},1",
             "",
             "[Events]",
             "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text",
         ]
     )
+
+
+def _animated_events(
+    transcript: Transcript, track: str, style_cfg: Dict, settings: Settings
+) -> List[str]:
+    """يبني أحداث Dialogue بوسوم كاريوكي — المرحلة 3."""
+    from .animated import (
+        build_intro_tags,
+        build_karaoke_text,
+        collect_keywords_from_transcript,
+    )
+
+    keywords = (
+        collect_keywords_from_transcript(transcript, track=track, settings=settings)
+        if bool(settings.get("subtitles.highlight_keywords", True))
+        else set()
+    )
+    intro = build_intro_tags(
+        fade_ms=int(settings.get("subtitles.fade_ms", 120)),
+        pop=bool(settings.get("subtitles.pop_in", True)),
+    )
+    highlight = hex_to_ass_color(
+        settings.get("subtitles.highlight_color", "#FFD700"), "&H0000D7FF"
+    )
+    base = hex_to_ass_color(style_cfg.get("primary_color", "#FFFFFF"), "&H00FFFFFF")
+    rtl = bool(style_cfg.get("rtl", True))
+
+    events: List[str] = []
+    ordered = sorted(transcript.segments, key=lambda s: s.start)
+    for index, seg in enumerate(ordered):
+        if not (seg.display_text(track) or "").strip():
+            continue
+        body = build_karaoke_text(
+            seg,
+            keywords=keywords,
+            highlight_color=highlight,
+            base_color=base,
+            rtl=rtl,
+        )
+        if not body:
+            continue
+        start = max(0.0, float(seg.start))
+        end = max(start + 0.2, float(seg.end))
+        # منع التداخل مع الجملة التالية
+        if index + 1 < len(ordered):
+            nxt = float(ordered[index + 1].start)
+            if end > nxt:
+                end = max(start + 0.2, nxt - 0.01)
+        events.append(
+            f"Dialogue: 0,{_ass_timestamp(start)},{_ass_timestamp(end)},"
+            f"Default,,0,0,0,,{intro}{body}"
+        )
+
+    if events:
+        log.info("ترجمة متحركة: %d حدث، %d كلمة مبرَزة.", len(events), len(keywords))
+    return events
 
 
 def write_ass(
@@ -189,22 +250,39 @@ def write_ass(
     settings: Optional[Settings] = None,
     play_res_x: Optional[int] = None,
     play_res_y: Optional[int] = None,
+    animated: Optional[bool] = None,
 ) -> Path:
-    """يكتب ملف ASS بسيطاً واضح القراءة (المرحلة 1)."""
+    """يكتب ملف ASS — ثابتاً (المرحلة 1) أو متحركاً بأسلوب الكاريوكي (المرحلة 3).
+
+    الوضع المتحرك يلوّن الكلمة أثناء نطقها ويُبرز الكلمات المهمة؛ يُفعَّل عبر
+    ``subtitles.animated`` ويتراجع تلقائياً للثابت إن تعذّر.
+    """
     settings = settings or load_settings()
     style = settings.section("subtitles")
     res_x = int(play_res_x or settings.get("reframe.width", 1080))
     res_y = int(play_res_y or settings.get("reframe.height", 1920))
 
-    entries = _visible_segments(transcript, track, style)
+    use_animation = (
+        animated if animated is not None else bool(settings.get("subtitles.animated", False))
+    )
+
     header = build_ass_style(style, play_res_x=res_x, play_res_y=res_y)
 
     events: List[str] = []
-    for start, end, text in entries:
-        body = text.replace("\n", r"\N")
-        events.append(
-            f"Dialogue: 0,{_ass_timestamp(start)},{_ass_timestamp(end)},Default,,0,0,0,,{body}"
-        )
+    if use_animation:
+        try:
+            events = _animated_events(transcript, track, style, settings)
+        except Exception as exc:  # الحركة تحسين، لا يجوز أن تُفشل الإنتاج
+            log.warning("تعذّر بناء الترجمة المتحركة (%s) — ترجمة ثابتة.", exc)
+            events = []
+
+    if not events:
+        entries = _visible_segments(transcript, track, style)
+        for start, end, text in entries:
+            body = text.replace("\n", r"\N")
+            events.append(
+                f"Dialogue: 0,{_ass_timestamp(start)},{_ass_timestamp(end)},Default,,0,0,0,,{body}"
+            )
 
     p = Path(path)
     p.parent.mkdir(parents=True, exist_ok=True)

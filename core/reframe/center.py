@@ -1,8 +1,9 @@
 """محطة إعادة التأطير (Reframe) — تحويل الفيديو إلى مقاس عمودي 9:16.
 
-المرحلة 1: قصّ مركزي ثابت (Center Crop) — بسيط وسريع وبلا تبعيات.
-المرحلة 3: ستُضاف نسخة ``face_track`` باستخدام mediapipe + OpenCV، وستستخدم
-نفس واجهة ``reframe()`` فلا تحتاج بقية الوحدات لأي تعديل (المبدأ 5).
+الوضعان المدعومان عبر نفس الواجهة (المبدأ 5 — وحدات قابلة للاستبدال):
+- ``center``     (المرحلة 1): قصّ مركزي ثابت — بسيط وسريع وبلا تبعيات.
+- ``face_track`` (المرحلة 3): يتبع وجه المتحدث عبر OpenCV، ويتراجع تلقائياً
+  إلى القص المركزي إن لم يُكتشف وجه — فلا يفشل أبداً.
 
 منطق القص:
 - إن كان المصدر أعرض من النسبة المطلوبة → نقصّ من العرض (الحالة الشائعة 16:9 → 9:16).
@@ -86,6 +87,67 @@ def build_reframe_filter(
     )
 
 
+def _build_face_track_filter(
+    src: Path, info, *, out_w: int, out_h: int, settings: Settings
+) -> Tuple[str, str]:
+    """يبني فلتر تتبّع الوجه. يرجع ("", سبب) عند التعذّر ليتراجع المستدعي بأمان."""
+    from .face_track import (
+        average_focus,
+        build_dynamic_crop,
+        smooth_track,
+        track_faces,
+        track_spread,
+    )
+
+    try:
+        tracked = track_faces(src, settings=settings)
+    except Exception as exc:  # التتبّع تحسين، لا يجوز أن يُفشل الإنتاج
+        log.warning("تعذّر تتبّع الوجه (%s) — قص مركزي.", exc)
+        return "", "قص مركزي — تعذّر التتبّع"
+
+    min_rate = float(settings.get("reframe.min_detection_rate", 0.25))
+    if not tracked.found or tracked.detection_rate < min_rate:
+        log.info(
+            "لم يُكتشف وجه كافٍ (%.0f%% < %.0f%%) — قص مركزي.",
+            tracked.detection_rate * 100,
+            min_rate * 100,
+        )
+        return "", "قص مركزي — لا وجه واضح"
+
+    samples = smooth_track(
+        tracked.samples,
+        window=int(settings.get("reframe.smooth_window", 5)),
+        max_step=float(settings.get("reframe.max_step", 0.04)),
+    )
+
+    target_aspect = out_w / out_h
+    crop_w, crop_h, _, _ = compute_crop(info.width, info.height, target_aspect)
+
+    # وجه شبه ثابت لا يستحق تعبيراً متحركاً: قص ثابت على مركز ثقله أنظف وأسرع
+    spread = track_spread(samples)
+    if spread < float(settings.get("reframe.static_threshold", 0.04)):
+        fx, fy = average_focus(samples)
+        return (
+            build_reframe_filter(
+                info.width,
+                info.height,
+                out_w=out_w,
+                out_h=out_h,
+                focus_x=fx,
+                focus_y=fy,
+            ),
+            f"تتبّع الوجه — ثابت عند {fx:.2f}",
+        )
+
+    crop_expr = build_dynamic_crop(
+        samples, src_w=info.width, src_h=info.height, crop_w=crop_w, crop_h=crop_h
+    )
+    return (
+        f"{crop_expr},scale={out_w}:{out_h}:flags=lanczos,setsar=1",
+        f"تتبّع الوجه — متحرك ({len(samples)} نقطة)",
+    )
+
+
 def reframe(
     source_path: str | Path,
     output_path: str | Path,
@@ -110,12 +172,7 @@ def reframe(
         raise MediaError(f"الفيديو غير موجود: {src}")
 
     selected_mode = (mode or settings.get("reframe.mode", "center")).lower()
-    if selected_mode == "face_track":
-        log.warning(
-            "وضع تتبّع الوجه (face_track) يأتي في المرحلة 3 — سيُستخدم القص المركزي الآن."
-        )
-        selected_mode = "center"
-    if selected_mode != "center":
+    if selected_mode not in ("center", "face_track"):
         raise MediaError(f"وضع إعادة تأطير غير معروف: {selected_mode}")
 
     out_w = int(width or settings.get("reframe.width", 1080))
@@ -127,11 +184,23 @@ def reframe(
     if not info.has_video:
         raise MediaError(f"الملف لا يحتوي مساراً مرئياً: {src}")
 
-    vf = build_reframe_filter(
-        info.width, info.height, out_w=out_w, out_h=out_h, focus_x=fx, focus_y=fy
-    )
+    vf = ""
+    applied_mode = "قص مركزي"
+    if selected_mode == "face_track":
+        vf, applied_mode = _build_face_track_filter(
+            src, info, out_w=out_w, out_h=out_h, settings=settings
+        )
+    if not vf:
+        vf = build_reframe_filter(
+            info.width, info.height, out_w=out_w, out_h=out_h, focus_x=fx, focus_y=fy
+        )
     log.info(
-        "إعادة التأطير: %dx%d → %dx%d (قص مركزي)", info.width, info.height, out_w, out_h
+        "إعادة التأطير: %dx%d → %dx%d (%s)",
+        info.width,
+        info.height,
+        out_w,
+        out_h,
+        applied_mode,
     )
 
     # تطبيع الصوت يُدمج هنا مجاناً: هذه التمريرة تعيد ترميز الصوت أصلاً،
