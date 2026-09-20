@@ -307,6 +307,26 @@ def translate_transcript(
         except Exception as exc:
             raise TranslateError(f"فشل ترجمة الدفعة عند الجملة {i}: {exc}") from exc
 
+        # المحرك قد يُرجع عدداً مخالفاً لعدد المدخلات (يحدث مع NLLB عند نص
+        # فارغ أو طويل جداً). zip الصامت كان يترك جملاً بلا ترجمة فتُعرض
+        # بالإنجليزية داخل ملف عربي — نكشف الخلل بدل ابتلاعه.
+        if len(results) != len(chunk):
+            log.warning(
+                "المترجم أرجع %d نتيجة مقابل %d جملة (الدفعة عند %d) — "
+                "سيُعاد ترجمة الناقص جملةً جملة.",
+                len(results),
+                len(chunk),
+                i,
+            )
+            fixed: List[str] = list(results[: len(chunk)])
+            for seg in chunk[len(fixed) :]:
+                try:
+                    fixed.append(translator.translate_one(normalize_text(seg.text)))
+                except Exception as exc:
+                    log.warning("تعذّرت ترجمة الجملة %d (%s) — يبقى نصها الأصلي.", seg.id, exc)
+                    fixed.append("")
+            results = fixed
+
         for seg, out in zip(chunk, results):
             seg.translation = out or seg.text
 
