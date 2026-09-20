@@ -415,6 +415,7 @@ def suggest_command(
             settings=settings,
             progress=_progress,
             source_video=result.source,
+            transcript=result.transcript,  # لا تُعِد التفريغ — تم في التحليل
         )
     except ArClipperError as exc:
         _fail(exc)

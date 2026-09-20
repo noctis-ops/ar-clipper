@@ -51,6 +51,24 @@
   button:hover:not(:disabled){background:var(--accent)}
   button:disabled{opacity:.5; cursor:not-allowed}
   .hint{font-size:12px; color:var(--muted); margin-top:6px}
+  /* مبدّل الوضع */
+  .modes{display:flex; gap:8px; margin-bottom:18px}
+  .modes button{
+    margin:0; padding:12px 10px; background:var(--panel); color:var(--muted);
+    border:1px solid var(--line); font-size:14px;
+  }
+  .modes button.on{background:var(--accent2); color:#fff; border-color:var(--accent2)}
+  /* بطاقات المقترحات */
+  .sug{
+    background:var(--panel2); border:1px solid var(--line); border-radius:10px;
+    padding:12px; margin-bottom:10px; display:flex; gap:10px; align-items:flex-start;
+  }
+  .sug.pick{border-color:var(--accent2); background:#16233a}
+  .sug input[type=checkbox]{width:18px; height:18px; margin-top:3px; flex:none; cursor:pointer}
+  .sug .body{flex:1; min-width:0}
+  .sug .ttl{font-weight:600; font-size:14px; margin-bottom:4px; line-height:1.5}
+  .sug .why{font-size:12px; color:var(--muted); margin-bottom:6px}
+  .sug .tags{font-size:11px; color:var(--accent); word-break:break-word}
   .hint code{background:var(--panel2); padding:2px 6px; border-radius:4px}
   #log{
     background:#0b0e14; border:1px solid var(--line); border-radius:9px;
@@ -92,6 +110,11 @@
 </header>
 
 <div class="wrap">
+  <div class="modes">
+    <button id="modeManual" class="on">✂️ أحدد التوقيت بنفسي</button>
+    <button id="modeAuto">🤖 اقترح لي أفضل المقاطع</button>
+  </div>
+
   <div class="grid">
     <!-- ============ الإدخال ============ -->
     <div>
@@ -102,7 +125,7 @@
         <div class="hint" id="srcInfo">الملفات المحلية تُقرأ مباشرة — لا شيء يُرفع لأي خادم.</div>
       </div>
 
-      <div class="card">
+      <div class="card" id="cardRange">
         <h2><span class="step">2</span> المدى الزمني</h2>
         <div class="row">
           <div>
@@ -115,6 +138,26 @@
           </div>
         </div>
         <div class="hint">الصيغة: <code>00:12:30</code> أو <code>750</code> (ثوانٍ)</div>
+      </div>
+
+      <div class="card" id="cardAuto" style="display:none">
+        <h2><span class="step">2</span> خيارات التحليل</h2>
+        <label>كم مقطعاً تريد؟</label>
+        <input id="count" type="number" min="1" max="20" value="6">
+        <label>محرك التحليل</label>
+        <select id="engine">
+          <option value="">الافتراضي من الإعدادات (hybrid)</option>
+          <option value="heuristic">استدلالي — بلا نموذج، الأسرع</option>
+          <option value="hybrid">هجين — استدلال + نموذج محلي</option>
+          <option value="llm">نموذج فقط — الأبطأ</option>
+        </select>
+        <div class="hint">
+          بلا Ollama مثبَّت يعمل الاستدلالي وحده — والأداة لا تفشل، تُكمل تلقائياً.
+        </div>
+        <label style="display:flex; gap:8px; align-items:center; margin-top:14px">
+          <input type="checkbox" id="diarize" checked style="width:auto">
+          <span>افصل المتحدثين (مضيف/ضيف)</span>
+        </label>
       </div>
 
       <div class="card">
@@ -139,6 +182,12 @@
         <div id="log"><div class="ev info">بانتظار البدء…</div></div>
         <div class="hint">أول تشغيل يحمّل نموذج التفريغ مرة واحدة — قد يستغرق دقائق.</div>
       </div>
+      <div class="card" id="sugCard" style="display:none">
+        <h2>🤖 المقاطع المقترحة</h2>
+        <div id="sugList"></div>
+        <button id="produce">🎬 أنتج المختار</button>
+        <div class="banner" id="sugBanner"></div>
+      </div>
       <div class="card" id="resultCard" style="display:none">
         <h2>✅ النتيجة</h2>
         <div id="results"></div>
@@ -150,6 +199,9 @@
 <script>
 const $ = id => document.getElementById(id);
 let PRESETS = [], LICENSES = [];
+let MODE = 'manual';          // manual | auto
+let ANALYSIS = null;          // job_id لنتيجة التحليل الحالية
+let SUGGESTIONS = [];
 
 async function init(){
   const r = await fetch('/api/options');
@@ -227,6 +279,13 @@ $('go').onclick = async () => {
   $('resultCard').style.display = 'none';
   logEvent('info', 'إرسال المهمة…');
 
+  if(MODE === 'auto'){
+    $('sugCard').style.display = 'none';
+    try{ await startSuggest(source); }
+    catch(e){ logEvent('error', e.message); showBanner('err', e.message); $('go').disabled = false; }
+    return;
+  }
+
   const payload = {
     source,
     start: $('start').value.trim(),
@@ -247,6 +306,134 @@ $('go').onclick = async () => {
     logEvent('error', e.message);
     showBanner('err', e.message);
     $('go').disabled = false;
+  }
+};
+
+// ============ تبديل الوضع ============
+function setMode(mode){
+  MODE = mode;
+  $('modeManual').classList.toggle('on', mode === 'manual');
+  $('modeAuto').classList.toggle('on', mode === 'auto');
+  $('cardRange').style.display = mode === 'manual' ? 'block' : 'none';
+  $('cardAuto').style.display  = mode === 'auto'   ? 'block' : 'none';
+  $('go').textContent = mode === 'manual' ? '🚀 أنتج المقطع' : '🤖 حلّل واقترح';
+  $('sugCard').style.display = 'none';
+  $('resultCard').style.display = 'none';
+}
+$('modeManual').onclick = () => setMode('manual');
+$('modeAuto').onclick   = () => setMode('auto');
+
+// ============ التحليل ============
+const KINDS = {
+  story:'📖 قصة', opinion:'💭 رأي', question:'❓ سؤال', surprise:'⚡ مفاجأة',
+  number:'📊 رقم', insight:'💡 فكرة', dense:'🔥 ذروة', general:'• عام'
+};
+
+function fmt(sec){
+  const m = Math.floor(sec/60), x = Math.floor(sec%60);
+  return `${m}:${String(x).padStart(2,'0')}`;
+}
+
+async function startSuggest(source){
+  const payload = {
+    source,
+    count: parseInt($('count').value) || 6,
+    engine: $('engine').value,
+    license_key: $('license').value,
+    diarize: $('diarize').checked
+  };
+  const r = await fetch('/api/suggest', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify(payload)
+  });
+  const d = await r.json();
+  if(!r.ok) throw new Error(d.detail || 'فشل بدء التحليل');
+  ANALYSIS = d.job_id;
+  followSuggest(d.job_id);
+}
+
+function followSuggest(jobId){
+  const es = new EventSource(`/api/jobs/${jobId}/stream`);
+  es.onmessage = ev => {
+    const d = JSON.parse(ev.data);
+    logEvent(d.kind, d.message);
+    if(d.kind === 'done'){ es.close(); showSuggestions(jobId); }
+    if(d.kind === 'error'){
+      es.close(); showBanner('err', d.message); $('go').disabled = false;
+    }
+  };
+  es.onerror = () => { es.close(); $('go').disabled = false; };
+}
+
+async function showSuggestions(jobId){
+  const r = await fetch(`/api/jobs/${jobId}`);
+  const d = await r.json();
+  $('go').disabled = false;
+  SUGGESTIONS = d.results || [];
+  if(!SUGGESTIONS.length){
+    showBanner('err', 'لم يُعثر على مقاطع — جرّب المحرك الاستدلالي أو فيديو أطول.');
+    return;
+  }
+  $('sugList').innerHTML = SUGGESTIONS.map(s => `
+    <label class="sug pick" data-i="${s.index}">
+      <input type="checkbox" checked onchange="togglePick(this)">
+      <div class="body">
+        <div class="ttl">${s.title || '(بلا عنوان)'}</div>
+        <div class="why">
+          ${KINDS[s.kind] || s.kind} · ${fmt(s.start)}–${fmt(s.end)} (${Math.round(s.duration)}ث)
+          ${s.speaker ? ' · ' + s.speaker : ''}<br>${s.reason}
+        </div>
+        ${s.hashtags && s.hashtags.length ? `<div class="tags">${s.hashtags.join(' ')}</div>` : ''}
+      </div>
+    </label>
+  `).join('');
+  $('sugCard').style.display = 'block';
+  showBanner('ok', `${SUGGESTIONS.length} مقترح — راجعها ثم أنتج ما يعجبك.`);
+}
+
+function togglePick(cb){
+  cb.closest('.sug').classList.toggle('pick', cb.checked);
+}
+
+$('produce').onclick = async () => {
+  const picked = [...document.querySelectorAll('.sug')]
+    .filter(el => el.querySelector('input').checked)
+    .map(el => parseInt(el.dataset.i));
+  if(!picked.length){
+    $('sugBanner').className = 'banner err';
+    $('sugBanner').textContent = 'اختر مقطعاً واحداً على الأقل.';
+    return;
+  }
+  $('produce').disabled = true;
+  $('sugBanner').className = 'banner';
+  logEvent('info', `إنتاج ${picked.length} مقطعاً…`);
+
+  try{
+    const r = await fetch('/api/produce', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({
+        analysis_id: ANALYSIS, indices: picked,
+        preset: $('preset').value, license_key: $('license').value
+      })
+    });
+    const d = await r.json();
+    if(!r.ok) throw new Error(d.detail || 'فشل بدء الإنتاج');
+    const es = new EventSource(`/api/jobs/${d.job_id}/stream`);
+    es.onmessage = ev => {
+      const e = JSON.parse(ev.data);
+      logEvent(e.kind, e.message);
+      if(e.kind === 'done'){ es.close(); $('produce').disabled = false; finish(d.job_id, null); }
+      if(e.kind === 'error'){
+        es.close(); $('produce').disabled = false;
+        $('sugBanner').className = 'banner err';
+        $('sugBanner').textContent = e.message;
+      }
+    };
+    es.onerror = () => { es.close(); $('produce').disabled = false; };
+  }catch(e){
+    $('produce').disabled = false;
+    $('sugBanner').className = 'banner err';
+    $('sugBanner').textContent = e.message;
   }
 };
 
@@ -279,10 +466,12 @@ async function finish(jobId, payload){
       </div>
       <div class="cmd">${res.video_path}</div>
     </div>
-  `).join('') + `
+  `).join('') + (payload ? `
     <div class="cmd">💡 نفس النتيجة من الطرفية:<br>
 ar-clipper clip "${payload.source}" --preset ${payload.preset} \\
-  -s ${payload.start} -e ${payload.end} -L ${payload.license_key}</div>`;
+  -s ${payload.start} -e ${payload.end} -L ${payload.license_key}</div>` : `
+    <div class="cmd">💡 نفس النتيجة من الطرفية:<br>
+ar-clipper suggest "${$('source').value.trim()}" --produce</div>`);
   $('resultCard').style.display = 'block';
 }
 

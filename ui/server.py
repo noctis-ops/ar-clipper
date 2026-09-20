@@ -77,6 +77,8 @@ class Job:
 
 
 JOBS: Dict[str, Job] = {}
+# نتائج التحليل محفوظة بالذاكرة ليتمكّن المستخدم من اختيار ما يُنتَج
+ANALYSES: Dict[str, Any] = {}
 
 
 # ============================================================ النماذج
@@ -93,6 +95,26 @@ class ClipPayload(BaseModel):
 
 class ProbePayload(BaseModel):
     source: str
+
+
+class SuggestPayload(BaseModel):
+    """طلب تحليل واقتراح مقاطع (المرحلة 2)."""
+
+    source: str
+    count: int = 6
+    engine: str = ""          # heuristic | llm | hybrid (فارغ = من الإعدادات)
+    license_key: str = "personal_test"
+    diarize: bool = True
+    translate: bool = True
+
+
+class ProducePayload(BaseModel):
+    """إنتاج مقاطع مختارة من نتيجة تحليل سابقة."""
+
+    analysis_id: str
+    indices: List[int] = []
+    preset: str = "campaign"
+    license_key: str = "personal_test"
 
 
 # ============================================================ المسارات
@@ -254,6 +276,130 @@ def job_stream(job_id: str) -> StreamingResponse:
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
+
+
+def _run_suggest(job: Job, payload: SuggestPayload) -> None:
+    """يحلّل المصدر ويقترح مقاطع، في خيط منفصل مع بثّ حي."""
+    from core.suggest import suggest_clips
+
+    try:
+        job.status = "running"
+        settings = load_settings()
+        options = PipelineOptions(
+            license_note=payload.license_key, translate=payload.translate
+        )
+        result = suggest_clips(
+            payload.source,
+            options=options,
+            settings=settings,
+            progress=lambda stage, msg: job.emit("stage", msg, stage=stage),
+            max_moments=payload.count,
+            analyze_engine=payload.engine or None,
+            diarize=payload.diarize,
+        )
+
+        ANALYSES[job.id] = result
+        job.results = [s.to_dict() for s in result.suggestions]
+        job.status = "done"
+
+        if not result.suggestions:
+            job.emit("done", "لم يُعثر على مقاطع مقترحة — جرّب محرك heuristic.")
+        else:
+            job.emit(
+                "done",
+                f"{len(result.suggestions)} مقترح جاهز للمراجعة",
+                speakers=result.speakers,
+                safety=result.safety.to_dict() if result.safety else None,
+            )
+    except ArClipperError as exc:
+        job.status = "error"
+        job.error = str(exc)
+        job.emit("error", str(exc))
+    except Exception as exc:  # pragma: no cover
+        job.status = "error"
+        job.error = f"خطأ غير متوقع: {exc}"
+        job.emit("error", job.error)
+        log.exception("فشل غير متوقع في التحليل %s", job.id)
+
+
+@app.post("/api/suggest")
+def create_suggestion(payload: SuggestPayload) -> Dict[str, str]:
+    """يبدأ تحليلاً يقترح أفضل المقاطع تلقائياً."""
+    if not payload.source.strip():
+        raise HTTPException(status_code=400, detail="حدّد رابطاً أو مسار ملف.")
+    job = Job(id=uuid.uuid4().hex[:12], source=payload.source)
+    JOBS[job.id] = job
+    threading.Thread(target=_run_suggest, args=(job, payload), daemon=True).start()
+    return {"job_id": job.id}
+
+
+def _run_produce(job: Job, payload: ProducePayload, analysis: Any) -> None:
+    """ينتج المقاطع المختارة من تحليل سابق (بلا إعادة تفريغ)."""
+    try:
+        job.status = "running"
+        settings = load_settings()
+        chosen = get_preset(payload.preset)
+        apply_preset_to_settings(chosen, settings)
+
+        options = PipelineOptions(license_note=payload.license_key)
+        for key, value in chosen.options.items():
+            if hasattr(options, key):
+                setattr(options, key, value)
+
+        requests = analysis.to_clip_requests(payload.indices or None)
+        if not requests:
+            raise ArClipperError("لم يُطابق أي مقترح الأرقام المحددة.")
+
+        job.emit("stage", f"إنتاج {len(requests)} مقطعاً — {chosen.label}")
+
+        results = run_pipeline(
+            analysis.source.path,
+            requests,
+            options=options,
+            settings=settings,
+            progress=lambda stage, msg: job.emit("stage", msg, stage=stage),
+            source_video=analysis.source,
+            transcript=analysis.transcript,  # لا إعادة تفريغ
+        )
+
+        for r in results:
+            job.results.append(
+                {
+                    "clip_id": r.clip_id,
+                    "video_path": r.video_path,
+                    "duration": r.duration,
+                    "duration_human": human_duration(r.duration),
+                    "width": r.width,
+                    "height": r.height,
+                    "subtitles": r.subtitle_files,
+                    "stages": r.stages,
+                }
+            )
+        job.status = "done"
+        job.emit("done", f"اكتمل — {len(results)} مقطع")
+    except ArClipperError as exc:
+        job.status = "error"
+        job.error = str(exc)
+        job.emit("error", str(exc))
+    except Exception as exc:  # pragma: no cover
+        job.status = "error"
+        job.error = f"خطأ غير متوقع: {exc}"
+        job.emit("error", job.error)
+        log.exception("فشل غير متوقع في الإنتاج %s", job.id)
+
+
+@app.post("/api/produce")
+def produce_from_analysis(payload: ProducePayload) -> Dict[str, str]:
+    """ينتج مقاطع مختارة من نتيجة تحليل سابقة."""
+    analysis = ANALYSES.get(payload.analysis_id)
+    if analysis is None:
+        raise HTTPException(
+            status_code=404, detail="نتيجة التحليل غير موجودة — أعد التحليل."
+        )
+    job = Job(id=uuid.uuid4().hex[:12], source=analysis.source.path)
+    JOBS[job.id] = job
+    threading.Thread(target=_run_produce, args=(job, payload, analysis), daemon=True).start()
+    return {"job_id": job.id}
 
 
 @app.get("/api/file")

@@ -10,6 +10,18 @@ from fastapi.testclient import TestClient  # noqa: E402
 from ui.server import app  # noqa: E402
 
 
+
+
+class _DummyThread:
+    """يمنع تشغيل خيط المعالجة الحقيقي أثناء الاختبار."""
+
+    def __init__(self, target=None, args=(), daemon=False, **kwargs):
+        self.target, self.args = target, args
+
+    def start(self):  # لا ينفّذ شيئاً عمداً
+        return None
+
+
 @pytest.fixture(scope="module")
 def client():
     return TestClient(app)
@@ -77,3 +89,76 @@ class TestFileSecurity:
 
         target = load_settings().path("paths.clips") / "nope" / "missing.mp4"
         assert client.get("/api/file", params={"path": str(target)}).status_code == 404
+
+
+# ============================================================ المرحلة 2
+
+
+class TestSuggestApi:
+    """مسارات الاقتراح التلقائي — بلا تشغيل فعلي لخط الأنابيب."""
+
+    def test_suggest_requires_source(self, client):
+        assert client.post("/api/suggest", json={"source": "   "}).status_code == 400
+
+    def test_suggest_returns_job_id(self, client, monkeypatch):
+        import ui.server as server
+
+        monkeypatch.setattr(server.threading, "Thread", _DummyThread)
+        r = client.post("/api/suggest", json={"source": "/tmp/x.mp4", "count": 3})
+        assert r.status_code == 200
+        assert r.json()["job_id"]
+
+    def test_suggest_defaults(self, client, monkeypatch):
+        import ui.server as server
+
+        captured = {}
+
+        def fake_thread(target, args, daemon):
+            captured["payload"] = args[1]
+            return _DummyThread(target=target, args=args, daemon=daemon)
+
+        monkeypatch.setattr(server.threading, "Thread", fake_thread)
+        client.post("/api/suggest", json={"source": "/tmp/x.mp4"})
+        payload = captured["payload"]
+        assert payload.count == 6
+        assert payload.diarize is True
+        assert payload.engine == ""
+
+    def test_produce_unknown_analysis_is_404(self, client):
+        r = client.post("/api/produce", json={"analysis_id": "nope", "indices": [0]})
+        assert r.status_code == 404
+
+    def test_produce_accepts_known_analysis(self, client, monkeypatch):
+        import ui.server as server
+        from core.common.schemas import SourceVideo
+        from core.suggest import Suggestion, SuggestionSet
+
+        analysis = SuggestionSet(
+            source=SourceVideo(path="/tmp/x.mp4", title="t"),
+            suggestions=[Suggestion(0, 0.0, 30.0, 3.0, "story", "سبب", title="عنوان")],
+        )
+        server.ANALYSES["test-analysis"] = analysis
+        monkeypatch.setattr(server.threading, "Thread", _DummyThread)
+        r = client.post(
+            "/api/produce", json={"analysis_id": "test-analysis", "indices": [0]}
+        )
+        assert r.status_code == 200
+        assert r.json()["job_id"]
+        server.ANALYSES.pop("test-analysis", None)
+
+
+class TestSuggestUi:
+    def test_page_has_both_modes(self, client):
+        text = client.get("/").text
+        assert "modeManual" in text
+        assert "modeAuto" in text
+
+    def test_page_calls_suggest_endpoints(self, client):
+        text = client.get("/").text
+        assert "/api/suggest" in text
+        assert "/api/produce" in text
+
+    def test_engine_choices_present(self, client):
+        text = client.get("/").text
+        for engine in ("heuristic", "hybrid", "llm"):
+            assert engine in text

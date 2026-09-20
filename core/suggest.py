@@ -88,6 +88,8 @@ class SuggestionSet:
     safety: Optional[SafetyReport] = None
     speakers: Dict[str, str] = field(default_factory=dict)
     elapsed: float = 0.0
+    # الترانسكربت نفسه — يُمرَّر للإنتاج فلا يُعاد التفريغ (لا يُحفظ في JSON)
+    transcript: Optional[Transcript] = field(default=None, repr=False, compare=False)
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -177,7 +179,9 @@ def suggest_clips(
 
     if not transcript.segments:
         log.warning("لا يوجد كلام في هذا الفيديو — لا مقترحات.")
-        return SuggestionSet(source=video, elapsed=time.time() - started)
+        return SuggestionSet(
+            source=video, transcript=transcript, elapsed=time.time() - started
+        )
 
     # 3) فصل المتحدثين (اختياري)
     speakers: Dict[str, str] = {}
@@ -186,6 +190,11 @@ def suggest_clips(
         speakers = stage_diarize(video, transcript, settings, progress)
         if speakers and transcript_path:
             transcript.save(transcript_path)  # حفظ بيانات المتحدثين
+    elif any(s.speaker for s in transcript.segments):
+        # الترانسكربت يحمل متحدثين من تشغيل سابق — نسمّيهم بدل عرض SPEAKER_00
+        from .diarize.speakers import friendly_names
+
+        speakers = friendly_names(transcript)
 
     # 4) التحليل
     progress("analyze", "اكتشاف أقوى اللحظات")
@@ -212,6 +221,7 @@ def suggest_clips(
             source=video,
             transcript_path=str(transcript_path) if transcript_path else None,
             speakers=speakers,
+            transcript=transcript,
             elapsed=time.time() - started,
         )
 
@@ -265,6 +275,7 @@ def suggest_clips(
         transcript_path=str(transcript_path) if transcript_path else None,
         safety=report,
         speakers=speakers,
+        transcript=transcript,
         elapsed=time.time() - started,
     )
 
