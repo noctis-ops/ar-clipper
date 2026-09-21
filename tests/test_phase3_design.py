@@ -980,3 +980,55 @@ class TestComplexFilterRouting:
         source = inspect.getsource(apply_filters)
         assert "is_complex" in source
         assert '";" in video_filter' in source
+
+
+class TestDetectionPreprocessing:
+    """معالجة الصورة قبل الكشف — خطأ هنا يُفقد الوجه صامتاً."""
+
+    def test_raw_image_is_tried_before_equalization(self):
+        """قياس فعلي: equalizeHist محا وجوهاً كانت تُكتشف بلا معالجة (1 → 0).
+
+        يجب أن تُجرَّب الصورة الخام أولاً، والمعادلة كاحتياطي فقط.
+        """
+        import inspect
+
+        from core.reframe.face_track import _detect_opencv
+
+        source = inspect.getsource(_detect_opencv)
+        raw_at = source.index("faces = _detect(gray)")
+        eq_at = source.index("cv2.equalizeHist(gray)")
+        assert raw_at < eq_at, "المعادلة تُطبَّق قبل محاولة الصورة الخام"
+
+    def test_equalization_still_available_as_fallback(self):
+        """لا نحذفها — تنفع الإضاءة السيئة."""
+        import inspect
+
+        from core.reframe.face_track import _detect_opencv
+
+        assert "equalizeHist" in inspect.getsource(_detect_opencv)
+
+
+@pytest.mark.slow
+class TestGeneratedSamples:
+    """عيّنات scripts/make_sample.py يجب أن تكون صالحة فعلاً للتتبّع."""
+
+    def test_synthetic_face_is_detectable(self):
+        """رسم بسيط (دائرة + نقطتان) لا يكتشفه Haar — جرّبناه فأعطى 0%."""
+        cv2 = pytest.importorskip("cv2")
+        import importlib.util
+        from pathlib import Path
+
+        spec = importlib.util.spec_from_file_location(
+            "make_sample", Path("scripts/make_sample.py")
+        )
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+
+        cascade = cv2.CascadeClassifier(
+            cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
+        )
+        for size in (200, 300, 360):
+            face = module._face(size)
+            gray = cv2.cvtColor(face, cv2.COLOR_BGR2GRAY)
+            found = cascade.detectMultiScale(gray, 1.1, 4, minSize=(30, 30))
+            assert len(found) >= 1, f"الوجه المُولَّد بحجم {size} غير قابل للكشف"

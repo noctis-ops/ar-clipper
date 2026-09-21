@@ -77,17 +77,27 @@ def _detect_opencv(frames: Sequence[Tuple[float, "object"]], min_size_ratio: flo
     for timestamp, frame in frames:
         height, width = frame.shape[:2]
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-        gray = cv2.equalizeHist(gray)
         min_side = max(24, int(width * min_size_ratio))
 
-        faces = cascade.detectMultiScale(
-            gray, scaleFactor=1.1, minNeighbors=5, minSize=(min_side, min_side)
-        )
-        if len(faces) == 0 and not profile.empty():
-            # المتحدث ملتفت للجانب — شائع جداً في حوار بين شخصين
-            faces = profile.detectMultiScale(
-                gray, scaleFactor=1.1, minNeighbors=5, minSize=(min_side, min_side)
+        # مهم: لا نبدأ بـ``equalizeHist``. قياسٌ فعلي أظهر أنه يمحو وجوهاً
+        # كانت تُكتشف بلا معالجة (1 → 0) في المشاهد المتجانسة الإضاءة، بينما
+        # لا يضيف شيئاً على الوجوه العادية. نجرّب الصورة الخام أولاً، ونلجأ
+        # إلى معادلة الهيستوغرام فقط حين يفشل الكشف — فتنفع الإضاءة السيئة
+        # بلا أن تضرّ الحالة الطبيعية.
+        def _detect(image):
+            found = cascade.detectMultiScale(
+                image, scaleFactor=1.1, minNeighbors=5, minSize=(min_side, min_side)
             )
+            if len(found) == 0 and not profile.empty():
+                # المتحدث ملتفت للجانب — شائع جداً في حوار بين شخصين
+                found = profile.detectMultiScale(
+                    image, scaleFactor=1.1, minNeighbors=5, minSize=(min_side, min_side)
+                )
+            return found
+
+        faces = _detect(gray)
+        if len(faces) == 0:
+            faces = _detect(cv2.equalizeHist(gray))
         if len(faces) == 0:
             continue
 
