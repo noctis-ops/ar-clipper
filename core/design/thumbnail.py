@@ -306,23 +306,29 @@ def _cover_resize(image, target_w: int, target_h: int):
 
 
 def _load_font(settings: Settings, size: int):
-    """يحمّل خطاً يدعم العربية، مع تراجع لخط Pillow الافتراضي."""
+    """يحمّل خطاً يدعم العربية، مع تراجع لخط Pillow الافتراضي.
+
+    البحث يمرّ عبر ``core.common.fonts`` الذي يعرف مجلدات ويندوز وماك ولينكس.
+    الاعتماد على مسار لينكس ثابت كان يُسقط ويندوز إلى خط Pillow الافتراضي،
+    وهو **لا يرسم العربية إطلاقاً** (مربّعات فارغة).
+    """
     from PIL import ImageFont
 
-    candidates = [
-        settings.get("thumbnail.font_file", "") or "",
-        "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
-        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
-    ]
-    for candidate in candidates:
-        if candidate and Path(candidate).exists():
-            try:
-                return ImageFont.truetype(candidate, size)
-            except OSError:
-                continue
+    from ..common.fonts import find_font_file
+
+    found = find_font_file(str(settings.get("thumbnail.font_file", "") or ""))
+    if found:
+        try:
+            return ImageFont.truetype(str(found), size)
+        except OSError:
+            pass
     try:  # الخط المرفق مع matplotlib/Pillow إن وُجد
         return ImageFont.truetype("DejaVuSans-Bold.ttf", size)
     except OSError:
+        log.warning(
+            "لم يُعثر على خط يدعم العربية — قد يظهر النص مربّعات فارغة. "
+            "حدّد خطاً في settings.yaml تحت thumbnail.font_file."
+        )
         return ImageFont.load_default()
 
 

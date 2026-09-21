@@ -127,8 +127,21 @@ def prepare_subtitle_text(
 _ARABIC_PUNCT = "،؛؟٪«»ـٰ۔٫٬"
 
 
+# أسماء أجهزة محجوزة في ويندوز: لا يمكن إنشاء ملف بأيٍّ منها مهما كان الامتداد.
+# عنوان مقطع مثل "CON" أو "Aux" كان سيُفشل الكتابة على ويندوز فقط.
+_WINDOWS_RESERVED = (
+    {"CON", "PRN", "AUX", "NUL"}
+    | {f"COM{i}" for i in range(1, 10)}
+    | {f"LPT{i}" for i in range(1, 10)}
+)
+
+
 def slugify(text: str, max_len: int = 60, fallback: str = "clip") -> str:
-    """اسم ملف آمن: يبقي على العربية واللاتينية والأرقام فقط."""
+    """اسم ملف آمن على كل الأنظمة: عربية ولاتينية وأرقام فقط.
+
+    يتجنّب أيضاً أسماء ويندوز المحجوزة والنقطة/المسافة في النهاية (ويندوز
+    يحذفها صامتاً فيختلف الاسم عمّا سجّلناه).
+    """
     text = normalize_text(text)
     out = []
     for ch in text:
@@ -140,6 +153,10 @@ def slugify(text: str, max_len: int = 60, fallback: str = "clip") -> str:
             out.append("-")
     slug = re.sub(r"-{2,}", "-", "".join(out)).strip("-._")
     slug = slug[:max_len].strip("-._")
+    # ويندوز يحذف النقاط والمسافات الأخيرة صامتاً
+    slug = slug.rstrip(". ")
+    if slug.upper() in _WINDOWS_RESERVED:
+        slug = f"{slug}-clip"
     return slug or fallback
 
 

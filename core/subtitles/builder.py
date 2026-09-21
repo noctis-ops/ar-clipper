@@ -145,7 +145,11 @@ def _ass_timestamp(seconds: float) -> str:
 
 def build_ass_style(style_cfg: Dict, *, play_res_x: int, play_res_y: int) -> str:
     """يبني قسمي [Script Info] و [V4+ Styles] لملف ASS."""
-    font = style_cfg.get("font_name", "DejaVu Sans")
+    # اسم الخط الافتراضي يجب أن يوجد فعلاً على هذا النظام: ويندوز لا يعرف
+    # "DejaVu Sans" فكان libass يتراجع لخط قد لا يدعم العربية.
+    from ..common.fonts import default_ass_font
+
+    font = style_cfg.get("font_name", "") or default_ass_font()
     size = int(style_cfg.get("font_size", 54))
     primary = hex_to_ass_color(style_cfg.get("primary_color", "#FFFFFF"), "&H00FFFFFF")
     outline_c = hex_to_ass_color(style_cfg.get("outline_color", "#000000"), "&H00000000")

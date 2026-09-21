@@ -1026,6 +1026,28 @@ def doctor_command():
     except Exception:
         table.add_row("GPU (CUDA)", warn, "torch غير مثبّت — ستعمل المعالجة على CPU")
 
+    # الخط العربي — بلا خط مناسب تظهر الترجمة والمصغّرة مربّعات فارغة
+    try:
+        from core.common.fonts import describe as describe_fonts
+
+        info = describe_fonts()
+        if info["font_file"]:
+            table.add_row(
+                "الخط العربي",
+                ok,
+                f"{info['ass_family']} ({info['platform']})",
+            )
+        else:
+            problems += 1
+            hint = (
+                "ثبّت خطاً عربياً (ويندوز: Segoe UI موجود عادةً)"
+                if info["platform"] == "windows"
+                else "ثبّت: sudo apt install fonts-dejavu fonts-noto-core"
+            )
+            table.add_row("الخط العربي", bad, f"لم يُعثر على خط — {hint}")
+    except Exception as exc:  # pragma: no cover
+        table.add_row("الخط العربي", warn, str(exc))
+
     # الإعدادات والمجلدات
     try:
         settings = load_settings()

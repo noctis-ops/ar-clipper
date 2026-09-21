@@ -1,72 +1,98 @@
 # دليل التثبيت والتجربة الكاملة
 
-> كل أمر هنا **نُفِّذ فعلاً** وسُجِّلت نتيجته ووقته. لا خطوة نظرية.
-> آخر تحقق: 2026-09-22 · على بيئة نظيفة من الصفر.
+> **الدليل مكتوب لويندوز أولاً** (مع مكافئ لينكس/ماك في كل خطوة).
+> كل أمر هنا نُفِّذ فعلاً وسُجِّلت نتيجته. آخر تحقق: 2026-09-22.
 
 ---
 
-## الجزء الأول: التثبيت (‏~25 ثانية)
+## قبل أن تبدأ: المشغّل المختصر
+
+بدل كتابة `.venv\Scripts\python -m cli.main` في كل مرة، المشروع يوفّر مشغّلاً:
+
+| النظام | الأمر |
+|---|---|
+| **ويندوز** | `arc doctor` |
+| لينكس/ماك | `./arc.sh doctor` |
+
+**الدليل كله يستخدم `arc`** — إن كنت على لينكس/ماك اقرأها `./arc.sh`.
+
+---
+
+## الجزء الأول: التثبيت (~25 ثانية)
 
 ### 1. المتطلبات
 
-| المتطلب | الإصدار | ملاحظة |
-|---|---|---|
-| Python | 3.10+ | مُختبَر على 3.11 |
-| مساحة قرص | ~2 GB | للحزم والمخرجات |
-| ffmpeg | — | **لا تحتاج تثبيته**، يأتي مع `imageio-ffmpeg` |
-| إنترنت | لأول تثبيت فقط | بعدها كل شيء محلي |
+| المتطلب | التفصيل |
+|---|---|
+| Python | 3.10 أو أحدث — [python.org/downloads](https://www.python.org/downloads/) |
+| مساحة قرص | ~2 GB |
+| ffmpeg | **لا تحتاج تثبيته** — يأتي داخل الحزم |
+| إنترنت | لأول تثبيت فقط |
 
-### 2. الأوامر
+> **مهم عند تثبيت Python على ويندوز:** فعّل خيار **“Add Python to PATH”**
+> في أول شاشة من المثبّت، وإلا لن يعمل أمر `python` من موجّه الأوامر.
+
+### 2. أوامر التثبيت
+
+افتح **PowerShell** أو **Command Prompt** داخل مجلد المشروع:
+
+```powershell
+cd ar-clipper
+
+python -m venv .venv
+.venv\Scripts\python -m pip install --upgrade pip
+.venv\Scripts\pip install -r requirements.txt
+```
+
+<details>
+<summary>المكافئ على لينكس/ماك</summary>
 
 ```bash
 cd ar-clipper
-
 python3 -m venv .venv
 .venv/bin/pip install --upgrade pip
 .venv/bin/pip install -r requirements.txt
 ```
+</details>
 
 **النتيجة المقيسة: 22.5 ثانية.**
 
-> **على ويندوز** استبدل `.venv/bin/` بـ `.venv\Scripts\` في كل الأوامر التالية.
+> **إن رفض PowerShell التشغيل** برسالة عن “execution policy”، استخدم
+> Command Prompt بدلاً منه، أو نفّذ مرة واحدة:
+> `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned`
 
 ### 3. تأكيد التثبيت
 
-```bash
-.venv/bin/python -m cli.main doctor
+```powershell
+arc doctor
 ```
 
-يجب أن ينتهي بـ **«البيئة جاهزة ✅»**. علامات ⚠️ للترجمة وGPU وpyannote **طبيعية
-ولا تمنع العمل** — هذه إضافات اختيارية.
+يجب أن ينتهي بـ **«البيئة جاهزة ✅»**، ومن ضمن الصفوف:
 
-### 4. اختصار مريح (اختياري)
-
-```bash
-alias arc='.venv/bin/python -m cli.main'
+```
+│ الخط العربي │ ✅ │ Segoe UI (windows) │
 ```
 
-بعدها تكتب `arc doctor` بدل الأمر الطويل. الدليل يستخدم الصيغة الكاملة ليعمل
-عند الجميع.
+هذا الصف مهم: بدون خط عربي ستظهر الترجمة والصور المصغّرة **مربّعات فارغة**.
+ويندوز يأتي بـ Segoe UI جاهزاً فالأمر يُحلّ تلقائياً.
+
+علامات ⚠️ للترجمة وGPU وpyannote **طبيعية** — إضافات اختيارية.
 
 ---
 
-## الجزء الثاني: التحقق الآلي (‏~2 دقيقة)
+## الجزء الثاني: التحقق الآلي (~2 دقيقة)
 
-شغّل هذين قبل أي شيء — يثبتان أن كل شيء سليم عندك.
-
-```bash
-# 1) الاختبارات الوحدوية
-.venv/bin/python -m pytest tests/ -q
+```powershell
+.venv\Scripts\python -m pytest tests\ -q
 ```
-**المتوقع: `462 passed` خلال ~52 ثانية.**
+**المتوقع: `491 passed` خلال ~50 ثانية.**
 
-```bash
-# 2) الفحص الشامل من طرف لطرف
-.venv/bin/python scripts/e2e_check.py
+```powershell
+.venv\Scripts\python scripts\e2e_check.py
 ```
 **المتوقع: `نجح 19/19 فحصاً` خلال ~24 ثانية.**
 
-هذا الفحص يُنتج فيديو حقيقياً ويتحقق من: المقاس 9:16، حذف الصمت، ملفات
+الفحص الثاني يُنتج فيديو حقيقياً ويتحقق من: المقاس 9:16، حذف الصمت، ملفات
 SRT/VTT/ASS، النص العربي، إعادة ضبط التوقيت، سند الترخيص، الصورة المصغّرة،
 وتنظيف الملفات المؤقتة.
 
@@ -76,239 +102,231 @@ SRT/VTT/ASS، النص العربي، إعادة ضبط التوقيت، سند 
 
 ## الجزء الثالث: توليد عيّنات للتجربة
 
-لا تحتاج تنزيل أي فيديو. المشروع يولّد عيّناته محلياً:
+لا تحتاج تنزيل أي فيديو:
 
-```bash
-.venv/bin/python scripts/make_sample.py
+```powershell
+.venv\Scripts\python scripts\make_sample.py
 ```
 
 **النتيجة (~21 ثانية):**
 
 | العيّنة | المدة | الغرض |
 |---|---|---|
-| `data/samples/speaker.mp4` | 30s | متحدث يتحرّك أفقياً — لاختبار تتبّع الوجه |
-| `data/samples/dialogue.mp4` | 20s | متحدثان على الجانبين — لاختبار الشاشة المنقسمة |
-| `data/samples/static.mp4` | 15s | بلا وجوه — لاختبار التراجع الآمن |
+| `data\samples\speaker.mp4` | 30s | متحدث يتحرّك — لاختبار تتبّع الوجه |
+| `data\samples\dialogue.mp4` | 20s | متحدثان — لاختبار الشاشة المنقسمة |
+| `data\samples\static.mp4` | 15s | بلا وجوه — لاختبار التراجع الآمن |
 
-العيّنات مُولَّدة بالكامل محلياً: **بلا إنترنت وبلا حقوق طرف ثالث**.
+مُولَّدة محلياً بالكامل: بلا إنترنت وبلا حقوق طرف ثالث.
 
 ---
 
-## الجزء الرابع: تجربة الميزات — الطريق السريع
+## الجزء الرابع: تجربة الميزات
 
-### 4.0 أسهل بداية على الإطلاق
+> المسارات أدناه بخط مائل خلفي (`\`) لويندوز. على لينكس/ماك استخدم `/`.
+> **ملاحظة:** Python يقبل `/` على ويندوز أيضاً، فالأمران يعملان عندك.
 
-```bash
-.venv/bin/python -m cli.main quickstart
+### 4.0 أسرع بداية
+
+```powershell
+arc quickstart
 ```
-يسألك ثلاثة أسئلة فقط وينتج أول مقطع. إن أردت فهم ما يجري، تابع بالخطوات التالية.
+ثلاثة أسئلة وينتج أول مقطع.
 
-### 4.1 معاينة بلا تنفيذ (ابدأ دائماً بهذا)
+### 4.1 معاينة بلا تنفيذ (ابدأ بهذا دائماً)
 
-```bash
-.venv/bin/python -m cli.main clip data/samples/speaker.mp4 \
-    -s 0 -e 20 --dry-run
+```powershell
+arc clip data\samples\speaker.mp4 -s 0 -e 20 --dry-run
 ```
-يعرض جدول الخطة — المحطات، المقاس، النموذج — **بلا معالجة**. مفيد للتأكد قبل
-مقطع طويل.
+يعرض جدول الخطة بلا معالجة.
 
-### 4.2 تتبّع الوجه ⭐ (أهم ميزة في المرحلة 3)
+### 4.2 تتبّع الوجه ⭐ (أهم ميزة)
 
-```bash
-.venv/bin/python -m cli.main clip data/samples/speaker.mp4 \
-    -s 0 -e 20 --face-track --no-subtitles -L personal_test -n demo-track
+```powershell
+arc clip data\samples\speaker.mp4 -s 0 -e 20 --face-track --no-subtitles -L personal_test -n demo-track
 ```
 
-**النتيجة المقيسة: 11.7 ثانية** → `data/clips/speaker__*/demo-track/demo-track.mp4`
+**النتيجة المقيسة: 11.7 ثانية.**
+في السجل: `تتبّع الوجه (opencv): 94 وجه في 94 عيّنة (100%)`.
+حُذف الصمت تلقائياً: 20s → 15s.
 
-لاحظ في السجل: `تتبّع الوجه (opencv): 94 وجه في 94 عيّنة (100%)`.
-الوجه يبقى موسّطاً طوال المقطع رغم تحرّكه. وحُذف الصمت تلقائياً: 20s → 15s.
-
-**للمقارنة**، شغّل نفس الأمر بلا `--face-track` وقارن: القص المركزي الثابت
-يقطع الوجه حين يتحرّك.
+**للمقارنة** شغّل نفس الأمر بلا `--face-track` — القص الثابت يقطع الوجه حين يتحرّك.
 
 ### 4.3 الشاشة المنقسمة (حوار بين شخصين)
 
-```bash
-.venv/bin/python -m cli.main clip data/samples/dialogue.mp4 \
-    -s 0 -e 15 --face-track --no-subtitles --no-silence \
-    -L personal_test -n demo-split
+```powershell
+arc clip data\samples\dialogue.mp4 -s 0 -e 15 --face-track --no-subtitles --no-silence -L personal_test -n demo-split
 ```
+في السجل: `حوار ثنائي مكتشف (ثقة 100%)` ثم `شاشة منقسمة — متحدثان`.
+تعمل **تلقائياً** بلا علم إضافي.
 
-في السجل: `حوار ثنائي مكتشف (ثقة 100%): وجهان عند 0.25 و0.75` ثم
-`شاشة منقسمة — متحدثان`. تعمل **تلقائياً** بلا علم إضافي.
+### 4.4 التراجع الآمن (فيديو بلا وجوه)
 
-### 4.4 التراجع الآمن (لا وجوه في الفيديو)
-
-```bash
-.venv/bin/python -m cli.main clip data/samples/static.mp4 \
-    -s 0 -e 10 --face-track --no-subtitles -L personal_test -n demo-safe
+```powershell
+arc clip data\samples\static.mp4 -s 0 -e 10 --face-track --no-subtitles -L personal_test -n demo-safe
 ```
-السجل يقول `0 وجه` ثم يتراجع للقص المركزي **بلا خطأ**. هذا مقصود.
+`0 وجه` ثم يتراجع للقص المركزي **بلا خطأ**. هذا مقصود.
 
 ### 4.5 قوالب التصميم
 
-```bash
-.venv/bin/python -m cli.main templates                      # اعرض الخمسة
-.venv/bin/python -m cli.main clip data/samples/speaker.mp4 \
-    -s 0 -e 10 -T karaoke_pop --no-subtitles -L personal_test
+```powershell
+arc templates
+arc clip data\samples\speaker.mp4 -s 0 -e 10 -T karaoke_pop --no-subtitles -L personal_test
 ```
 
 ### 4.6 النسخ المتعددة للمقارنة (A/B)
 
-```bash
-.venv/bin/python -m cli.main clip data/samples/speaker.mp4 \
-    -s 0 -e 10 --variants classic,bold_yellow,news \
-    --no-subtitles --no-silence -L personal_test
+```powershell
+arc clip data\samples\speaker.mp4 -s 0 -e 10 --variants classic,bold_yellow,news --no-subtitles --no-silence -L personal_test
 ```
-**النتيجة المقيسة: 18.5 ثانية لثلاث نسخ** — تجدها بلواحق `__classic`,
-`__bold_yellow`, `__news`.
+**المقيس: 18.5 ثانية لثلاث نسخ.**
 
-### 4.7 الصورة المصغّرة والهوية البصرية
+### 4.7 الصورة المصغّرة والهوية
 
-الصورة المصغّرة تُولَّد **تلقائياً** مع كل مقطع (ملف `.jpg` بجانب الفيديو).
-لنص جذاب عليها:
+المصغّرة تُولَّد **تلقائياً** مع كل مقطع (`.jpg` بجانب الفيديو). لنص عليها:
 
-```bash
-.venv/bin/python -m cli.main clip data/samples/speaker.mp4 \
-    -s 0 -e 10 --hook "الذكاء الاصطناعي سيغيّر كل شيء" \
-    --no-subtitles -L personal_test
+```powershell
+arc clip data\samples\speaker.mp4 -s 0 -e 10 --hook "الذكاء الاصطناعي سيغيّر كل شيء" --no-subtitles -L personal_test
 ```
 
-الهوية (شعار + علامة مائية) **معطّلة افتراضياً**. لتفعيلها حرّر
-`config/settings.yaml`:
+الهوية (شعار + علامة مائية) معطّلة افتراضياً. لتفعيلها حرّر
+`config\settings.yaml`:
 
 ```yaml
 branding:
   enabled: true
-  logo_path: /مسار/إلى/شعارك.png
+  logo_path: C:/Users/اسمك/Pictures/logo.png   # استخدم / حتى على ويندوز
   handle: "@حسابك"
 ```
 
+> **مهم:** داخل ملفات YAML اكتب المسار بـ `/` لا `\`، لأن `\` محرف هروب في YAML.
+
 ### 4.8 الواجهة في المتصفح
 
-```bash
-.venv/bin/python -m cli.main serve
+```powershell
+arc serve
 ```
-افتح `http://localhost:8000`. كل ما سبق متاح بالنقر: القوالب، تتبّع الوجه،
-الكاريوكي، نص المصغّرة — وتعرض لك **أمر الطرفية المكافئ** لتتعلّمه.
+افتح `http://localhost:8000`. كل ما سبق متاح بالنقر، وتعرض لك **أمر الطرفية
+المكافئ** لتتعلّمه.
 
 ---
 
-## الجزء الخامس: الميزات التي تحتاج تنزيل نماذج
+## الجزء الخامس: ميزات تحتاج تنزيل نماذج
 
-كل ما سبق يعمل **بلا إنترنت**. الميزات التالية تحتاج تنزيلاً أول مرة فقط،
-وكلها **مجانية**.
+كل ما سبق يعمل بلا إنترنت. التالي يحتاج تنزيلاً أول مرة فقط، وكله **مجاني**.
 
 ### 5.1 الترجمة العربية والتفريغ
 
-```bash
-.venv/bin/pip install transformers torch sentencepiece   # أفضل جودة (NLLB-200)
-# أو الأخف:
-.venv/bin/pip install argostranslate
+```powershell
+.venv\Scripts\pip install transformers torch sentencepiece
+```
+أو الأخف: `.venv\Scripts\pip install argostranslate`
+
+ثم المسار الكامل (سيُنزَّل نموذج Whisper أول مرة، `small` ≈ 460 MB):
+
+```powershell
+arc clip <رابط-أو-ملف> -s 0 -e 45 -L personal_test
 ```
 
-ثم جرّب المسار الكامل مع الترجمة (سيُنزّل نموذج Whisper أول مرة):
+### 5.2 الاقتراح التلقائي (المرحلة 2)
 
-```bash
-.venv/bin/python -m cli.main clip <رابط-أو-ملف> -s 0 -e 45 -L personal_test
+> **انتبه:** `suggest` يحتاج تفريغ الكلام أولاً، فيتطلب نموذج Whisper.
+> بدونه يفشل برسالة «تعذّر تحميل نموذج small» — وهذا ليس عطلاً.
+
+```powershell
+arc suggest <فيديو-فيه-كلام> --engine heuristic
 ```
 
-### 5.2 الاقتراح التلقائي للمقاطع (المرحلة 2)
+> عيّنات `make_sample.py` بلا كلام حقيقي، فلن تعطي اقتراحات مفيدة.
+> استخدم بودكاست حقيقياً لهذه الميزة.
 
-> **انتبه:** `suggest` يحتاج تفريغ الكلام أولاً، فهو يتطلب نموذج Whisper
-> (يُنزَّل مرة واحدة، حجم `small` ≈ 460 MB). بدونه سيفشل برسالة
-> «تعذّر تحميل نموذج small» — وهذا ليس عطلاً.
-
-بعد توفّر النموذج، محرّك الاستدلال المحلي يعمل بلا أي تنزيل إضافي:
-
-```bash
-.venv/bin/python -m cli.main suggest data/samples/speaker.mp4 --engine heuristic
-```
-
-> عيّنات `make_sample.py` **صامتة أو بنغمة بسيطة** بلا كلام حقيقي، فلن تعطي
-> اقتراحات مفيدة. استخدم بودكاست حقيقياً لتجربة هذه الميزة.
-
-ولجودة أعلى، بنموذج لغوي محلي مجاني:
-```bash
-# ثبّت Ollama من https://ollama.com ثم:
-ollama pull qwen2.5:7b
-.venv/bin/python -m cli.main suggest <مصدر> --engine llm
-```
+ولجودة أعلى بنموذج محلي مجاني: ثبّت [Ollama](https://ollama.com) ثم
+`ollama pull qwen2.5:7b` واستخدم `--engine llm`.
 
 ### 5.3 فصل المتحدثين
 
-```bash
-.venv/bin/pip install pyannote.audio
+```powershell
+.venv\Scripts\pip install pyannote.audio
 ```
-يتطلب حساباً مجانياً على HuggingFace وقبول شروط النموذج يدوياً.
+يتطلب حساباً مجانياً على HuggingFace وقبول شروط النموذج.
 
 ---
 
-## الجزء السادس: من رابط يوتيوب حقيقي
+## الجزء السادس: من رابط يوتيوب
 
-```bash
-.venv/bin/python -m cli.main clip "https://www.youtube.com/watch?v=..." \
-    -s 00:05:30 -e 00:06:15 -L fair_use_edu --face-track --animated-subs
+```powershell
+arc clip "https://www.youtube.com/watch?v=..." -s 00:05:30 -e 00:06:15 -L fair_use_edu --face-track --animated-subs
 ```
 
-`-L` هو **أساس الاستخدام** (التزام أخلاقي في المشروع). القيم:
+`-L` هو **أساس الاستخدام** (التزام أخلاقي في المشروع):
 `personal_test` · `fair_use_edu` · `cc_by_source` · `owner_permission`.
-اعرضها بـ `.venv/bin/python -m cli.main presets`.
+اعرضها بـ `arc presets`.
+
+> ضع الرابط **بين علامتَي اقتباس** دائماً على ويندوز — الرموز `&` و`?` في
+> روابط يوتيوب يفسّرها موجّه الأوامر.
 
 ---
 
 ## الجزء السابع: الصيانة
 
-```bash
-.venv/bin/python -m cli.main clean --dry-run   # ماذا سيُحذف؟
-.venv/bin/python -m cli.main clean             # نفّذ
-.venv/bin/python -m cli.main info <ملف>        # معلومات وسائط
+```powershell
+arc clean --dry-run     # ماذا سيُحذف؟
+arc clean               # نفّذ
+arc info <ملف>          # معلومات وسائط
 ```
 
-لإعادة إنتاج مقطع موجود بسرعة، أضف `--resume` (يتخطّى المُنتَج مسبقاً في 0.03s).
+أضف `--resume` لتخطّي المقاطع المُنتَجة مسبقاً (**0.2 ثانية** بدل إعادة الإنتاج).
 
 ---
 
 ## ملخص: قائمة تحقق سريعة
 
-```bash
-python3 -m venv .venv && .venv/bin/pip install -r requirements.txt   # 1) ثبّت
-.venv/bin/python -m cli.main doctor                                  # 2) افحص
-.venv/bin/python -m pytest tests/ -q                                 # 3) 462 ✅
-.venv/bin/python scripts/e2e_check.py                                # 4) 19/19 ✅
-.venv/bin/python scripts/make_sample.py                              # 5) عيّنات
-.venv/bin/python -m cli.main clip data/samples/speaker.mp4 \
-    -s 0 -e 20 --face-track --no-subtitles -L personal_test          # 6) جرّب
-.venv/bin/python -m cli.main serve                                   # 7) الواجهة
+```powershell
+python -m venv .venv
+.venv\Scripts\pip install -r requirements.txt        REM 1) ثبّت (22s)
+arc doctor                                            REM 2) افحص
+.venv\Scripts\python -m pytest tests\ -q              REM 3) 491 ✅
+.venv\Scripts\python scripts\e2e_check.py             REM 4) 19/19 ✅
+.venv\Scripts\python scripts\make_sample.py           REM 5) عيّنات
+arc clip data\samples\speaker.mp4 -s 0 -e 20 --face-track --no-subtitles -L personal_test
+arc serve                                             REM 7) الواجهة
 ```
 
-**الزمن الكلي من الصفر إلى أول مقطع: أقل من 3 دقائق.**
+**من الصفر إلى أول مقطع: أقل من 3 دقائق.**
 
 ---
 
 ## حلّ المشكلات
 
+### خاص بويندوز
+
 | العَرَض | السبب | الحل |
 |---|---|---|
-| `ModuleNotFoundError` | البيئة غير مفعّلة | استخدم `.venv/bin/python` لا `python` |
-| `libGL.so.1` مفقود | حزمة opencv الخاطئة | `pip uninstall opencv-python opencv-contrib-python` ثم `pip install "opencv-python-headless<5"` |
+| `'python' is not recognized` | لم يُضَف لـPATH | أعد تثبيت Python وفعّل “Add Python to PATH” |
+| `arc` غير معروف | لست في مجلد المشروع | `cd` إلى مجلد المشروع، أو استخدم `.\arc` |
+| PowerShell يرفض التشغيل | execution policy | استخدم Command Prompt، أو `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned` |
+| نص عربي = مربّعات | لا خط عربي | شغّل `arc doctor` وراجع صف «الخط العربي» |
+| خطأ في مسار داخل YAML | `\` محرف هروب | اكتب المسارات بـ `/` داخل `settings.yaml` |
+| المسار طويل جداً | حدّ 260 محرفاً | انقل المشروع قرب جذر القرص (`C:\ar-clipper`) |
+| الطرفية تعرض `????` | ترميز الطرفية | نفّذ `chcp 65001` مرة واحدة |
+
+### عام
+
+| العَرَض | السبب | الحل |
+|---|---|---|
+| `ModuleNotFoundError` | البيئة غير مفعّلة | استخدم `.venv\Scripts\python` لا `python` |
+| `libGL.so.1` مفقود (لينكس) | حزمة opencv الخاطئة | `pip install "opencv-python-headless<5"` |
 | تعذّر تحميل نموذج التفريغ | لا إنترنت لأول تنزيل | جرّب بـ `--no-subtitles` أولاً |
-| التتبّع بطيء | طبيعي (~2.6s) | يُخزَّن مؤقتاً: إعادة التشغيل تكلف 0.001s |
-| لا يُكتشف وجه | إضاءة سيئة أو وجه صغير | خفّض `reframe.min_face_ratio` في `settings.yaml` |
-| مقطع بلا صوت | المصدر بلا مسار صوتي | تحقق بـ `cli.main info <ملف>` |
+| التتبّع بطيء | طبيعي (~2.6s) | يُخزَّن مؤقتاً: الإعادة 0.001s |
+| لا يُكتشف وجه | إضاءة سيئة أو وجه صغير | خفّض `reframe.min_face_ratio` |
 
 ---
 
 ## للمطوّرين
 
-```bash
-.venv/bin/python -m pytest tests/ -m "not slow"      # سريع، بلا ترميز
-.venv/bin/python -m pytest tests/test_phase3_design.py -v
-.venv/bin/pip install coverage && \
-  .venv/bin/python -m coverage run -m pytest tests/ && \
-  .venv/bin/python -m coverage report
+```powershell
+.venv\Scripts\python -m pytest tests\ -m "not slow"
+.venv\Scripts\python -m pytest tests\test_cross_platform.py -v
 ```
 
-الوثائق: `docs/PROJECT_MASTER.md` (مصدر الحقيقة) · `docs/PROGRESS.md` (التقدّم)
-· `docs/REVIEW-PHASE-1-2.md` و`docs/REVIEW-PHASE-3.md` (التقييمات).
+الوثائق: `docs/PROJECT_MASTER.md` (مصدر الحقيقة) · `docs/PROGRESS.md` ·
+`docs/REVIEW-PHASE-1-2.md` و`docs/REVIEW-PHASE-3.md`.

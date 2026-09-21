@@ -97,7 +97,9 @@ subtitles:
   burn: true
   # النص الذي يُحرق على الفيديو: ar | source | bilingual
   track: ar
-  font_name: DejaVu Sans
+  # فارغ = اكتشاف تلقائي لخط يدعم العربية حسب النظام
+  # (Segoe UI على ويندوز، Geeza Pro على ماك، DejaVu/Noto على لينكس)
+  font_name: ""
   font_size: 54
   primary_color: "#FFFFFF"
   # لون الكلمات قبل نطقها في وضع الكاريوكي (رمادي هادئ، لا أحمر صارخ)
