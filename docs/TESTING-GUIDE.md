@@ -11,10 +11,34 @@
 
 | النظام | الأمر |
 |---|---|
-| **ويندوز** | `arc doctor` |
+| **ويندوز — PowerShell** | `.\arc doctor` |
+| **ويندوز — Command Prompt** | `arc doctor` |
 | لينكس/ماك | `./arc.sh doctor` |
 
-**الدليل كله يستخدم `arc`** — إن كنت على لينكس/ماك اقرأها `./arc.sh`.
+ثلاثة ملفات في جذر المشروع تخدم هذا: `arc.bat` (cmd و PowerShell)،
+`arc.ps1` (PowerShell أصلي برسائل عربية)، و`arc.sh` (لينكس/ماك).
+كلها تضبط ترميز UTF-8 تلقائياً فتظهر المخرجات العربية صحيحة.
+
+> ### ⚠️ لماذا `.\` قبل `arc` في PowerShell؟
+> لأن PowerShell **لا يشغّل أي برنامج من المجلد الحالي** بلا مسار صريح —
+> إجراء أمان مقصود يمنع تنفيذ ملف خبيث بالخطأ لمجرد أنه يحمل اسم أمر شائع.
+> كتابة `arc` وحدها تعطي `CommandNotFoundException`، و`.\arc` تعمل.
+>
+> **Command Prompt (cmd) لا يشترط ذلك** — فيه `arc` وحدها تكفي.
+
+### اجعل `arc` تعمل بلا `.\` (اختياري)
+
+إن أزعجك تكرار `.\`، أضف مجلد المشروع إلى PATH لهذه الجلسة:
+
+```powershell
+$env:Path = "$PWD;$env:Path"
+arc doctor          # تعمل الآن بلا .\
+```
+
+يسري على النافذة الحالية فقط. لجعله دائماً أضف السطر إلى ملف `$PROFILE`.
+
+**الدليل يستخدم `.\arc`** لأنها تعمل في PowerShell وcmd معاً.
+على لينكس/ماك اقرأها `./arc.sh`.
 
 ---
 
@@ -64,7 +88,7 @@ python3 -m venv .venv
 ### 3. تأكيد التثبيت
 
 ```powershell
-arc doctor
+.\arc doctor
 ```
 
 يجب أن ينتهي بـ **«البيئة جاهزة ✅»**، ومن ضمن الصفوف:
@@ -128,21 +152,21 @@ SRT/VTT/ASS، النص العربي، إعادة ضبط التوقيت، سند 
 ### 4.0 أسرع بداية
 
 ```powershell
-arc quickstart
+.\arc quickstart
 ```
 ثلاثة أسئلة وينتج أول مقطع.
 
 ### 4.1 معاينة بلا تنفيذ (ابدأ بهذا دائماً)
 
 ```powershell
-arc clip data\samples\speaker.mp4 -s 0 -e 20 --dry-run
+.\arc clip data\samples\speaker.mp4 -s 0 -e 20 --dry-run
 ```
 يعرض جدول الخطة بلا معالجة.
 
 ### 4.2 تتبّع الوجه ⭐ (أهم ميزة)
 
 ```powershell
-arc clip data\samples\speaker.mp4 -s 0 -e 20 --face-track --no-subtitles -L personal_test -n demo-track
+.\arc clip data\samples\speaker.mp4 -s 0 -e 20 --face-track --no-subtitles -L personal_test -n demo-track
 ```
 
 **النتيجة المقيسة: 11.7 ثانية.**
@@ -154,7 +178,7 @@ arc clip data\samples\speaker.mp4 -s 0 -e 20 --face-track --no-subtitles -L pers
 ### 4.3 الشاشة المنقسمة (حوار بين شخصين)
 
 ```powershell
-arc clip data\samples\dialogue.mp4 -s 0 -e 15 --face-track --no-subtitles --no-silence -L personal_test -n demo-split
+.\arc clip data\samples\dialogue.mp4 -s 0 -e 15 --face-track --no-subtitles --no-silence -L personal_test -n demo-split
 ```
 في السجل: `حوار ثنائي مكتشف (ثقة 100%)` ثم `شاشة منقسمة — متحدثان`.
 تعمل **تلقائياً** بلا علم إضافي.
@@ -162,21 +186,21 @@ arc clip data\samples\dialogue.mp4 -s 0 -e 15 --face-track --no-subtitles --no-s
 ### 4.4 التراجع الآمن (فيديو بلا وجوه)
 
 ```powershell
-arc clip data\samples\static.mp4 -s 0 -e 10 --face-track --no-subtitles -L personal_test -n demo-safe
+.\arc clip data\samples\static.mp4 -s 0 -e 10 --face-track --no-subtitles -L personal_test -n demo-safe
 ```
 `0 وجه` ثم يتراجع للقص المركزي **بلا خطأ**. هذا مقصود.
 
 ### 4.5 قوالب التصميم
 
 ```powershell
-arc templates
-arc clip data\samples\speaker.mp4 -s 0 -e 10 -T karaoke_pop --no-subtitles -L personal_test
+.\arc templates
+.\arc clip data\samples\speaker.mp4 -s 0 -e 10 -T karaoke_pop --no-subtitles -L personal_test
 ```
 
 ### 4.6 النسخ المتعددة للمقارنة (A/B)
 
 ```powershell
-arc clip data\samples\speaker.mp4 -s 0 -e 10 --variants classic,bold_yellow,news --no-subtitles --no-silence -L personal_test
+.\arc clip data\samples\speaker.mp4 -s 0 -e 10 --variants classic,bold_yellow,news --no-subtitles --no-silence -L personal_test
 ```
 **المقيس: 18.5 ثانية لثلاث نسخ.**
 
@@ -185,7 +209,7 @@ arc clip data\samples\speaker.mp4 -s 0 -e 10 --variants classic,bold_yellow,news
 المصغّرة تُولَّد **تلقائياً** مع كل مقطع (`.jpg` بجانب الفيديو). لنص عليها:
 
 ```powershell
-arc clip data\samples\speaker.mp4 -s 0 -e 10 --hook "الذكاء الاصطناعي سيغيّر كل شيء" --no-subtitles -L personal_test
+.\arc clip data\samples\speaker.mp4 -s 0 -e 10 --hook "الذكاء الاصطناعي سيغيّر كل شيء" --no-subtitles -L personal_test
 ```
 
 الهوية (شعار + علامة مائية) معطّلة افتراضياً. لتفعيلها حرّر
@@ -203,7 +227,7 @@ branding:
 ### 4.8 الواجهة في المتصفح
 
 ```powershell
-arc serve
+.\arc serve
 ```
 افتح `http://localhost:8000`. كل ما سبق متاح بالنقر، وتعرض لك **أمر الطرفية
 المكافئ** لتتعلّمه.
@@ -224,7 +248,7 @@ arc serve
 ثم المسار الكامل (سيُنزَّل نموذج Whisper أول مرة، `small` ≈ 460 MB):
 
 ```powershell
-arc clip <رابط-أو-ملف> -s 0 -e 45 -L personal_test
+.\arc clip <رابط-أو-ملف> -s 0 -e 45 -L personal_test
 ```
 
 ### 5.2 الاقتراح التلقائي (المرحلة 2)
@@ -233,7 +257,7 @@ arc clip <رابط-أو-ملف> -s 0 -e 45 -L personal_test
 > بدونه يفشل برسالة «تعذّر تحميل نموذج small» — وهذا ليس عطلاً.
 
 ```powershell
-arc suggest <فيديو-فيه-كلام> --engine heuristic
+.\arc suggest <فيديو-فيه-كلام> --engine heuristic
 ```
 
 > عيّنات `make_sample.py` بلا كلام حقيقي، فلن تعطي اقتراحات مفيدة.
@@ -254,12 +278,12 @@ arc suggest <فيديو-فيه-كلام> --engine heuristic
 ## الجزء السادس: من رابط يوتيوب
 
 ```powershell
-arc clip "https://www.youtube.com/watch?v=..." -s 00:05:30 -e 00:06:15 -L fair_use_edu --face-track --animated-subs
+.\arc clip "https://www.youtube.com/watch?v=..." -s 00:05:30 -e 00:06:15 -L fair_use_edu --face-track --animated-subs
 ```
 
 `-L` هو **أساس الاستخدام** (التزام أخلاقي في المشروع):
 `personal_test` · `fair_use_edu` · `cc_by_source` · `owner_permission`.
-اعرضها بـ `arc presets`.
+اعرضها بـ `.\arc presets`.
 
 > ضع الرابط **بين علامتَي اقتباس** دائماً على ويندوز — الرموز `&` و`?` في
 > روابط يوتيوب يفسّرها موجّه الأوامر.
@@ -269,9 +293,9 @@ arc clip "https://www.youtube.com/watch?v=..." -s 00:05:30 -e 00:06:15 -L fair_u
 ## الجزء السابع: الصيانة
 
 ```powershell
-arc clean --dry-run     # ماذا سيُحذف؟
-arc clean               # نفّذ
-arc info <ملف>          # معلومات وسائط
+.\arc clean --dry-run     # ماذا سيُحذف؟
+.\arc clean               # نفّذ
+.\arc info <ملف>          # معلومات وسائط
 ```
 
 أضف `--resume` لتخطّي المقاطع المُنتَجة مسبقاً (**0.2 ثانية** بدل إعادة الإنتاج).
@@ -283,12 +307,12 @@ arc info <ملف>          # معلومات وسائط
 ```powershell
 python -m venv .venv
 .venv\Scripts\pip install -r requirements.txt        REM 1) ثبّت (22s)
-arc doctor                                            REM 2) افحص
+.\arc doctor                                            REM 2) افحص
 .venv\Scripts\python -m pytest tests\ -q              REM 3) 491 ✅
 .venv\Scripts\python scripts\e2e_check.py             REM 4) 19/19 ✅
 .venv\Scripts\python scripts\make_sample.py           REM 5) عيّنات
-arc clip data\samples\speaker.mp4 -s 0 -e 20 --face-track --no-subtitles -L personal_test
-arc serve                                             REM 7) الواجهة
+.\arc clip data\samples\speaker.mp4 -s 0 -e 20 --face-track --no-subtitles -L personal_test
+.\arc serve                                             REM 7) الواجهة
 ```
 
 **من الصفر إلى أول مقطع: أقل من 3 دقائق.**
@@ -302,12 +326,14 @@ arc serve                                             REM 7) الواجهة
 | العَرَض | السبب | الحل |
 |---|---|---|
 | `'python' is not recognized` | لم يُضَف لـPATH | أعد تثبيت Python وفعّل “Add Python to PATH” |
-| `arc` غير معروف | لست في مجلد المشروع | `cd` إلى مجلد المشروع، أو استخدم `.\arc` |
+| `arc : The term 'arc' is not recognized` | **PowerShell لا يشغّل من المجلد الحالي** | اكتب `.\arc` بدل `arc` — أو استخدم Command Prompt |
+| `.\arc` لا يعمل أيضاً | لست في مجلد المشروع | `cd` إلى المجلد الذي فيه `arc.bat` |
+| مسار المشروع طويل | قرب حدّ 260 محرفاً | انقله إلى `C:\ar-clipper` — `.\arc doctor` ينبّهك |
 | PowerShell يرفض التشغيل | execution policy | استخدم Command Prompt، أو `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned` |
-| نص عربي = مربّعات | لا خط عربي | شغّل `arc doctor` وراجع صف «الخط العربي» |
+| نص عربي = مربّعات | لا خط عربي | شغّل `.\arc doctor` وراجع صف «الخط العربي» |
 | خطأ في مسار داخل YAML | `\` محرف هروب | اكتب المسارات بـ `/` داخل `settings.yaml` |
 | المسار طويل جداً | حدّ 260 محرفاً | انقل المشروع قرب جذر القرص (`C:\ar-clipper`) |
-| الطرفية تعرض `????` | ترميز الطرفية | نفّذ `chcp 65001` مرة واحدة |
+| الطرفية تعرض `????` أو رموزاً | ترميز الطرفية | المشغّلات تضبطه تلقائياً؛ يدوياً: `chcp 65001` |
 
 ### عام
 

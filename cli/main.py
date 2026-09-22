@@ -1026,6 +1026,30 @@ def doctor_command():
     except Exception:
         table.add_row("GPU (CUDA)", warn, "torch غير مثبّت — ستعمل المعالجة على CPU")
 
+    # ويندوز: حدّ 260 محرفاً للمسار. مشروع في مجلد عميق (مثل Downloads
+    # بعد فكّ ضغط باسم طويل) قد يفشل عند كتابة مقطع بعنوان عربي طويل.
+    import sys as _sys
+
+    if _sys.platform.startswith("win"):
+        root_len = len(str(Path.cwd().resolve()))
+        # أطول لاحقة واقعية: data/clips/<workspace>/<clip>/<clip>.transcript.json
+        margin = 260 - root_len - 150
+        if margin < 0:
+            problems += 1
+            table.add_row(
+                "طول المسار (ويندوز)",
+                bad,
+                f"جذر المشروع {root_len} محرفاً — انقله إلى C:\\ar-clipper",
+            )
+        elif margin < 40:
+            table.add_row(
+                "طول المسار (ويندوز)",
+                warn,
+                f"جذر المشروع {root_len} محرفاً — الهامش ضيق، يُفضّل C:\\ar-clipper",
+            )
+        else:
+            table.add_row("طول المسار (ويندوز)", ok, f"{root_len} محرفاً")
+
     # الخط العربي — بلا خط مناسب تظهر الترجمة والمصغّرة مربّعات فارغة
     try:
         from core.common.fonts import describe as describe_fonts

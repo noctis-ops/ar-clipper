@@ -155,3 +155,86 @@ class TestPathHandling:
             for match in re.finditer(r"\.write_text\(", source):
                 tail = source[match.start() : match.start() + 400]
                 assert "encoding=" in tail, f"كتابة بلا ترميز صريح في {path}"
+
+
+class TestLaunchers:
+    """المشغّلات في جذر المشروع — أول ما يلمسه المستخدم."""
+
+    def test_all_three_exist(self):
+        for name in ("arc.bat", "arc.ps1", "arc.sh"):
+            assert Path(name).exists(), f"{name} مفقود"
+
+    def test_bat_is_pure_ascii(self):
+        """رسائل عربية داخل .bat تظهر رموزاً مشوّهة قبل تنفيذ chcp."""
+        raw = Path("arc.bat").read_bytes()
+        assert all(b < 128 for b in raw), "arc.bat يحتوي أحرفاً غير ASCII"
+
+    def test_bat_sets_utf8_codepage(self):
+        assert "chcp 65001" in Path("arc.bat").read_text(encoding="utf-8")
+
+    def test_bat_passes_all_arguments(self):
+        """%* لا %1 — وإلا ضاعت كل المعاملات بعد الأولى."""
+        content = Path("arc.bat").read_text(encoding="utf-8")
+        assert "%*" in content
+
+    def test_bat_resolves_its_own_directory(self):
+        """%~dp0 يجعله يعمل من أي مجلد، لا من جذر المشروع فقط."""
+        assert "%~dp0" in Path("arc.bat").read_text(encoding="utf-8")
+
+    def test_bat_quotes_python_path(self):
+        """مسار فيه مسافات (C:\\Users\\My Name\\...) يكسر الأمر بلا اقتباس."""
+        assert '"%PY%"' in Path("arc.bat").read_text(encoding="utf-8")
+
+    def test_ps1_uses_splatting(self):
+        """@args لا $args — الثاني يمرّر المصفوفة كسلسلة واحدة."""
+        content = Path("arc.ps1").read_text(encoding="utf-8")
+        assert "@args" in content
+        assert "-m cli.main $args" not in content
+
+    def test_ps1_propagates_exit_code(self):
+        assert "$LASTEXITCODE" in Path("arc.ps1").read_text(encoding="utf-8")
+
+    def test_sh_is_executable(self):
+        import os
+        import stat
+
+        if sys.platform.startswith("win"):
+            pytest.skip("أذونات التنفيذ لا معنى لها على ويندوز")
+        mode = os.stat("arc.sh").st_mode
+        assert mode & stat.S_IXUSR, "arc.sh غير قابل للتنفيذ"
+
+    def test_launchers_check_for_missing_venv(self):
+        """رسالة واضحة خير من ImportError غامض."""
+        assert "if not exist" in Path("arc.bat").read_text(encoding="utf-8")
+        assert "Test-Path" in Path("arc.ps1").read_text(encoding="utf-8")
+        assert "-x " in Path("arc.sh").read_text(encoding="utf-8")
+
+
+class TestGuideAccuracy:
+    """الدليل يجب أن يطابق الواقع — وثيقة خاطئة أسوأ من لا وثيقة."""
+
+    def _guide(self):
+        return Path("docs/TESTING-GUIDE.md").read_text(encoding="utf-8")
+
+    def test_no_bare_arc_command_lines(self):
+        """PowerShell يرفض 'arc' بلا .\\ — كان هذا خطأ حقيقياً في الدليل.
+
+        الاستثناء الوحيد المسموح: السطر الذي يوضّح أن `arc` تعمل بعد إضافة
+        المجلد إلى PATH، وهو معلَّم بتعليق صريح على نفس السطر.
+        """
+        import re
+
+        for line in self._guide().splitlines():
+            if not re.match(r"^arc\s", line):
+                continue
+            assert "#" in line and "PATH" in self._guide(), (
+                f"سطر أمر بلا .\\ ولا تفسير: {line}"
+            )
+
+    def test_explains_the_dot_slash_requirement(self):
+        assert "CommandNotFoundException" in self._guide()
+
+    def test_mentions_all_platforms(self):
+        guide = self._guide()
+        for token in ("PowerShell", "Command Prompt", "arc.sh"):
+            assert token in guide
