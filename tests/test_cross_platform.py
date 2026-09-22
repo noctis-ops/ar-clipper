@@ -238,3 +238,82 @@ class TestGuideAccuracy:
         guide = self._guide()
         for token in ("PowerShell", "Command Prompt", "arc.sh"):
             assert token in guide
+
+
+class TestSuggestedCommands:
+    """الأوامر المقترحة في المخرجات يجب أن تكون قابلة للنسخ واللصق.
+
+    خطأ حقيقي: ``doctor`` كان يقترح ``ar-clipper quickstart`` وهو اسم غير
+    مسجَّل (لا pyproject.toml ينشئ نقطة دخول). المستخدم ينسخه فيحصل على
+    ``CommandNotFoundException`` — نفس الخطأ الذي أبلغ عنه.
+    """
+
+    def test_no_unregistered_command_name_in_cli(self):
+        source = Path("cli/main.py").read_text(encoding="utf-8")
+        assert "ar-clipper " not in source, "اقتراح أمر غير مسجَّل في cli/main.py"
+
+    def test_launcher_matches_platform(self, monkeypatch):
+        import core.common.platform_utils as pu
+
+        monkeypatch.setattr(pu, "is_windows", lambda: True)
+        monkeypatch.setattr(pu, "in_powershell", lambda: True)
+        assert pu.launcher() == ".\\arc"
+
+        monkeypatch.setattr(pu, "in_powershell", lambda: False)
+        assert pu.launcher() == "arc"
+
+        monkeypatch.setattr(pu, "is_windows", lambda: False)
+        assert pu.launcher() == "./arc.sh"
+
+    def test_cmd_builds_full_command(self, monkeypatch):
+        import core.common.platform_utils as pu
+
+        monkeypatch.setattr(pu, "is_windows", lambda: True)
+        monkeypatch.setattr(pu, "in_powershell", lambda: True)
+        assert pu.cmd("quickstart") == ".\\arc quickstart"
+
+    def test_cmd_without_args(self):
+        from core.common.platform_utils import cmd, launcher
+
+        assert cmd() == launcher()
+
+    def test_powershell_detected_by_env(self, monkeypatch):
+        import core.common.platform_utils as pu
+
+        monkeypatch.setattr(pu, "is_windows", lambda: True)
+        monkeypatch.setenv("PSModulePath", r"C:\Program Files\PowerShell\Modules")
+        assert pu.in_powershell() is True
+        monkeypatch.delenv("PSModulePath", raising=False)
+        assert pu.in_powershell() is False
+
+    def test_doctor_output_uses_real_launcher(self):
+        """المخرج الفعلي يجب أن يحوي مشغّلاً صالحاً لهذا النظام."""
+        from typer.testing import CliRunner
+
+        from cli.main import app
+        from core.common.platform_utils import launcher
+
+        result = CliRunner().invoke(app, ["doctor"])
+        assert launcher() in result.output
+
+
+class TestOptionalExtrasDoc:
+    """الوثيقة تصف مفاتيح إعدادات حقيقية."""
+
+    def test_documented_config_keys_exist(self):
+        import yaml
+
+        doc = Path("docs/OPTIONAL-EXTRAS.md").read_text(encoding="utf-8")
+        config = yaml.safe_load(Path("config/settings.yaml").read_text(encoding="utf-8"))
+
+        if "analyze:" in doc and "model:" in doc:
+            assert "model" in config["analyze"], "مفتاح analyze.model غير موجود"
+        if "silence.engine" in doc:
+            assert "engine" in config["silence"]
+
+    def test_auto_editor_is_truly_optional(self):
+        """الوثيقة تنصح بتجاهله — تأكد أن الافتراضي ليس هو."""
+        import yaml
+
+        config = yaml.safe_load(Path("config/settings.yaml").read_text(encoding="utf-8"))
+        assert config["silence"]["engine"] == "ffmpeg"

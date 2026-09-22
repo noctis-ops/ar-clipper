@@ -2,14 +2,16 @@
 
 الأمر الرئيسي:
 
-    ar-clipper clip <المصدر> --start 00:12:30 --end 00:13:20 --license "إذن المالك"
+    {_cmd('clip <المصدر> --start 00:12:30 --end 00:13:20 --license ')}f"إذن المالك"
 
 أوامر مساعدة:
 
-    ar-clipper doctor         فحص البيئة والتبعيات
-    ar-clipper transcribe     تفريغ وترجمة فقط (بدون إنتاج فيديو)
-    ar-clipper show           عرض ترانسكربت محفوظ مع التوقيت
-    ar-clipper info           معلومات ملف وسائط
+    doctor         فحص البيئة والتبعيات
+    transcribe     تفريغ وترجمة فقط (بدون إنتاج فيديو)
+    show           عرض ترانسكربت محفوظ مع التوقيت
+    info           معلومات ملف وسائط
+
+(شغّلها بـ .\arc على ويندوز أو ./arc.sh على لينكس/ماك)
 """
 
 from __future__ import annotations
@@ -39,6 +41,7 @@ from core.ingest.downloader import suggest_workspace_name
 from core.pipeline import PipelineOptions, run_pipeline, stage_ingest, stage_transcript
 from core.maintenance import disk_report, sweep_tmp
 from core.design.templates import apply_template, get_template, load_templates
+from core.common.platform_utils import cmd as _cmd
 from core.presets import apply_preset_to_settings, get_preset, load_presets
 from core.suggest import suggest_clips
 
@@ -640,8 +643,8 @@ def suggest_command(
         console.print(
             Panel(
                 "لإنتاج المقاطع:\n"
-                f"  [cyan]ar-clipper suggest \"{source}\" --produce[/]           ← الكل\n"
-                f"  [cyan]ar-clipper suggest \"{source}\" --pick 0,2[/]          ← مختارة\n\n"
+                f"  [cyan]{_cmd('suggest')} \"{source}\" --produce[/]           ← الكل\n"
+                f"  [cyan]{_cmd('suggest')} \"{source}\" --pick 0,2[/]          ← مختارة\n\n"
                 "[dim]التفريغ محفوظ، فلن يُعاد — الإنتاج سيبدأ مباشرةً.[/]",
                 title="[bold green]الخطوة التالية[/]",
                 border_style="green",
@@ -769,7 +772,7 @@ def quickstart_command():
         Panel(
             "المقطع جاهز ✅\n\n"
             "لتكرار نفس النتيجة مباشرةً في المرة القادمة:\n"
-            f"  [cyan]ar-clipper clip \"{source}\" --preset campaign "
+            f"  [cyan]{_cmd('clip')} \"{source}\" --preset campaign "
             f"-s {start_raw} -e {end_raw} -L {license_key}[/]",
             title="[bold green]تم[/]",
             border_style="green",
@@ -800,10 +803,10 @@ def presets_command():
     console.print(
         Panel(
             "أمثلة:\n"
-            "  [cyan]ar-clipper quickstart[/]                                  ← الأسهل للبداية\n"
-            "  [cyan]ar-clipper clip v.mp4 -p campaign -s 60 -e 105[/]         ← حملة clipping\n"
-            "  [cyan]ar-clipper clip v.mp4 -p fast -s 60 -e 105[/]             ← معاينة سريعة\n"
-            "  [cyan]ar-clipper clip v.mp4 -p campaign -i[/]                   ← اختيار المدى تفاعلياً",
+            f"  [cyan]{_cmd('quickstart')}[/]                                  ← الأسهل للبداية\n"
+            f"  [cyan]{_cmd('clip v.mp4 -p campaign -s 60 -e 105')}[/]         ← حملة clipping\n"
+            f"  [cyan]{_cmd('clip v.mp4 -p fast -s 60 -e 105')}[/]             ← معاينة سريعة\n"
+            f"  [cyan]{_cmd('clip v.mp4 -p campaign -i')}[/]                   ← اختيار المدى تفاعلياً",
             title="[bold]كيف تستخدمها[/]",
             border_style="cyan",
         )
@@ -912,7 +915,7 @@ def serve_command(
             ArClipperError(
                 "الواجهة تحتاج حزمتين إضافيتين:\n\n"
                 "    pip install fastapi \"uvicorn[standard]\"\n\n"
-                "أو استخدم الطرفية مباشرةً:  ar-clipper quickstart"
+                f"أو استخدم الطرفية مباشرةً:  {_cmd('quickstart')}"
             )
         )
         return
@@ -1129,7 +1132,7 @@ def doctor_command():
     except ImportError:
         missing_optional.append(
             "الواجهة الرسومية غير مثبّتة:\n"
-            "    [cyan]pip install fastapi \"uvicorn[standard]\"[/]  ثم:  [cyan]ar-clipper serve[/]"
+            f"    [cyan]pip install fastapi \"uvicorn[standard]\"[/]  ثم:  [cyan]{_cmd('serve')}[/]"
         )
 
     try:
@@ -1140,7 +1143,7 @@ def doctor_command():
                 "اقتراح المقاطع تلقائياً (المرحلة 2) يعمل أفضل بنموذج محلي مجاني:\n"
                 "    1) ثبّت Ollama من https://ollama.com\n"
                 "    2) [cyan]ollama pull qwen2.5:7b[/]\n"
-                "    بدونه تعمل الأداة بالاستدلال: [cyan]ar-clipper suggest <مصدر> --engine heuristic[/]"
+                f"    بدونه تعمل الأداة بالاستدلال: [cyan]{_cmd('suggest <مصدر> --engine heuristic')}[/]"
             )
     except Exception:
         pass
@@ -1155,9 +1158,9 @@ def doctor_command():
         Panel(
             "البيئة جاهزة ✅\n\n"
             "ابدأ من هنا:\n"
-            "    [cyan]ar-clipper quickstart[/]     ← 3 أسئلة وينتج أول مقطع\n"
-            "    [cyan]ar-clipper serve[/]          ← واجهة في المتصفح\n"
-            "    [cyan]ar-clipper presets[/]        ← المسارات الجاهزة",
+            f"    [cyan]{_cmd('quickstart')}[/]     ← 3 أسئلة وينتج أول مقطع\n"
+            f"    [cyan]{_cmd('serve')}[/]          ← واجهة في المتصفح\n"
+            f"    [cyan]{_cmd('presets')}[/]        ← المسارات الجاهزة",
             title="[bold green]جاهز[/]",
             border_style="green",
         )
@@ -1184,7 +1187,7 @@ def templates_command():
         table.add_row(key, tpl.label, tpl.description, "✨" if animated else "—")
     console.print(table)
     console.print(
-        "\n[dim]الاستخدام:  [cyan]ar-clipper clip <رابط> -s 0 -e 30 -T karaoke_pop[/]\n"
+        f"\n[dim]الاستخدام:  [cyan]{_cmd('clip <رابط> -s 0 -e 30 -T karaoke_pop')}[/]\n"
         "مقارنة نسخ:  [cyan]--variants classic,bold_yellow,news[/][/]"
     )
 
