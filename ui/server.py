@@ -14,6 +14,8 @@
 
 from __future__ import annotations
 
+import hashlib
+
 import queue
 import threading
 import time
@@ -28,7 +30,7 @@ from pydantic import BaseModel
 
 from core.common.config import load_settings
 from core.common.errors import ArClipperError
-from core.common.ffmpeg import probe
+from core.common.ffmpeg import probe, run_ffmpeg
 from core.common.logging_utils import get_logger
 from core.common.schemas import ClipRequest
 from core.common.text_utils import human_duration, parse_timestamp
@@ -444,6 +446,50 @@ def produce_from_analysis(payload: ProducePayload) -> Dict[str, str]:
     _prune(JOBS, MAX_JOBS)
     threading.Thread(target=_run_produce, args=(job, payload, analysis), daemon=True).start()
     return {"job_id": job.id}
+
+
+@app.get("/api/preview")
+def preview_moment(source: str, start: float = 0.0, end: float = 0.0):
+    """معاينة سريعة للحظة من المصدر قبل إنتاجها.
+
+    لا ترميز كامل ولا إعادة تأطير — مجرد نسخ المجرى (``-c copy``) لبضع
+    ثوانٍ. الغرض أن يسمع المستخدم اللحظة ويقرّر قبل دفع كلفة الإنتاج،
+    وهي الخطوة التي كانت ناقصة مقارنةً بالأدوات التجارية.
+    """
+    src = Path(source)
+    if not src.exists():
+        raise HTTPException(status_code=404, detail="المصدر غير موجود.")
+
+    duration = max(1.0, min(float(end) - float(start), 90.0))
+    settings = load_settings()
+    cache = settings.path("paths.tmp") / "previews"
+    cache.mkdir(parents=True, exist_ok=True)
+
+    key = hashlib.sha1(
+        f"{src.resolve()}|{start:.2f}|{duration:.2f}".encode("utf-8")
+    ).hexdigest()[:16]
+    out = cache / f"{key}.mp4"
+
+    if not out.exists():
+        try:
+            run_ffmpeg([
+                "-ss", f"{float(start):.3f}", "-i", str(src),
+                "-t", f"{duration:.3f}",
+                # نسخ المجرى: شبه فوري ولا يستهلك المعالج
+                "-c", "copy", "-avoid_negative_ts", "make_zero",
+                str(out),
+            ])
+        except Exception:
+            # بعض الصيغ لا تقبل القصّ بالنسخ عند نقطة ليست keyframe
+            run_ffmpeg([
+                "-ss", f"{float(start):.3f}", "-i", str(src),
+                "-t", f"{duration:.3f}",
+                "-c:v", "libx264", "-preset", "ultrafast", "-crf", "30",
+                "-vf", "scale=-2:360", "-c:a", "aac", "-b:a", "96k",
+                str(out),
+            ])
+
+    return FileResponse(out, media_type="video/mp4")
 
 
 @app.get("/api/file")

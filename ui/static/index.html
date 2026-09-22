@@ -67,6 +67,24 @@
   .thumb{margin:10px 0}
   .thumb summary{cursor:pointer; font-weight:600; padding:6px 0}
   .thumb img{width:100%; max-width:220px; border-radius:8px; margin:8px 0; display:block}
+  .sugHead{display:flex; justify-content:space-between; align-items:flex-start; gap:10px}
+  .scoreBox{flex:none; text-align:center; border-radius:8px; padding:4px 8px; min-width:52px; line-height:1.15}
+  .scoreBox b{display:block; font-size:17px}
+  .scoreBox span{font-size:10px; opacity:.85}
+  .scoreBox.hi{background:#0f3d24; color:#4ade80}
+  .scoreBox.mid{background:#3d340f; color:#fbbf24}
+  .scoreBox.low{background:#333; color:#9aa0a6}
+  .bar{height:4px; background:#2a2a2e; border-radius:3px; margin:7px 0; overflow:hidden}
+  .bar i{display:block; height:100%; border-radius:3px}
+  .bar i.hi{background:#4ade80} .bar i.mid{background:#fbbf24} .bar i.low{background:#6b7280}
+  .prevBtn{margin-top:8px; padding:5px 12px; font-size:12px; background:#2a2a2e;
+    color:#e8e8ea; border:1px solid #3a3a40; border-radius:6px; cursor:pointer}
+  .prevBtn:hover{background:#34343a}
+  .prevBox video{width:100%; max-width:260px; margin-top:8px; border-radius:8px; display:block}
+  .hookLine{margin-top:6px; font-size:13px; color:#e5c07b}
+  .quote{margin-top:6px; font-size:12px; color:#9aa0a6}
+  .quote summary{cursor:pointer}
+  .quote p{margin:6px 0 0; line-height:1.7; max-height:120px; overflow:auto}
   .chk{display:flex; align-items:center; gap:8px; margin:10px 0; cursor:pointer; font-weight:500}
   .chk input[type=checkbox]{width:18px; height:18px; flex:none; cursor:pointer; margin:0}
   .sug input[type=checkbox]{width:18px; height:18px; margin-top:3px; flex:none; cursor:pointer}
@@ -404,21 +422,55 @@ async function showSuggestions(jobId){
     showBanner('err', 'لم يُعثر على مقاطع — جرّب المحرك الاستدلالي أو فيديو أطول.');
     return;
   }
-  $('sugList').innerHTML = SUGGESTIONS.map(s => `
+  // ترتيب تنازلي بالدرجة: الأقوى أولاً (مثل Opus Clip)
+  SUGGESTIONS = [...SUGGESTIONS].sort((a, b) => (b.score || 0) - (a.score || 0));
+
+  $('sugList').innerHTML = SUGGESTIONS.map((s, rank) => {
+    const pct = Math.max(0, Math.min(100, Math.round((s.score || 0) * 10)));
+    const tier = pct >= 75 ? 'hi' : (pct >= 50 ? 'mid' : 'low');
+    const label = pct >= 75 ? 'قوي جداً' : (pct >= 50 ? 'جيد' : 'متوسط');
+    return `
     <label class="sug pick" data-i="${s.index}">
-      <input type="checkbox" checked onchange="togglePick(this)">
+      <input type="checkbox" ${rank < 3 ? 'checked' : ''} onchange="togglePick(this)">
       <div class="body">
-        <div class="ttl">${s.title || '(بلا عنوان)'}</div>
+        <div class="sugHead">
+          <div class="ttl">${s.title || '(بلا عنوان)'}</div>
+          <div class="scoreBox ${tier}" title="درجة الجاذبية المقدَّرة">
+            <b>${pct}</b><span>${label}</span>
+          </div>
+        </div>
+        <div class="bar"><i class="${tier}" style="width:${pct}%"></i></div>
         <div class="why">
           ${KINDS[s.kind] || s.kind} · ${fmt(s.start)}–${fmt(s.end)} (${Math.round(s.duration)}ث)
           ${s.speaker ? ' · ' + s.speaker : ''}<br>${s.reason}
         </div>
+        ${s.hook ? `<div class="hookLine">🎣 ${s.hook}</div>` : ''}
+        <button class="prevBtn" type="button"
+                onclick="event.preventDefault();playPreview(this, ${s.start}, ${s.end})">
+          ▶ استمع قبل الإنتاج
+        </button>
+        <div class="prevBox"></div>
+        ${s.text ? `<details class="quote"><summary>النص المنطوق</summary><p>${s.text}</p></details>` : ''}
         ${s.hashtags && s.hashtags.length ? `<div class="tags">${s.hashtags.join(' ')}</div>` : ''}
       </div>
-    </label>
-  `).join('');
+    </label>`;
+  }).join('');
   $('sugCard').style.display = 'block';
-  showBanner('ok', `${SUGGESTIONS.length} مقترح — راجعها ثم أنتج ما يعجبك.`);
+  showBanner('ok', `${SUGGESTIONS.length} مقترح مرتّبة بالأقوى — أفضل 3 مُحدَّدة تلقائياً.`);
+}
+
+function playPreview(btn, start, end){
+  const box = btn.nextElementSibling;
+  if(box.dataset.loaded){
+    box.style.display = box.style.display === 'none' ? 'block' : 'none';
+    return;
+  }
+  btn.disabled = true; btn.textContent = '⏳ جارٍ التحضير...';
+  const src = $('source').value.trim();
+  const url = `/api/preview?source=${encodeURIComponent(src)}&start=${start}&end=${end}`;
+  box.innerHTML = `<video controls autoplay src="${url}"></video>`;
+  box.dataset.loaded = '1';
+  btn.disabled = false; btn.textContent = '▶ إخفاء/إظهار المعاينة';
 }
 
 function togglePick(cb){

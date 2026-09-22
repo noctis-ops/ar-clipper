@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import json
 import shutil
+import sys
 import subprocess
 from dataclasses import dataclass
 from functools import lru_cache
@@ -92,6 +93,30 @@ def has_ffprobe() -> bool:
 # ============================================================ التشغيل
 
 
+def _low_priority_kwargs() -> dict:
+    """يشغّل العملية بأولوية منخفضة ليبقى الجهاز مستجيباً.
+
+    الترميز يشبع المعالج بطبيعته. خفض الأولوية لا يبطئه فعلياً حين لا
+    ينافسه شيء، لكنه يمنع تجمّد الواجهة حين تستخدم الجهاز أثناء المعالجة.
+    على ويندوز نستخدم ``BELOW_NORMAL_PRIORITY_CLASS``، وعلى يونكس ``nice``.
+    """
+    try:
+        from .config import load_settings
+
+        if not load_settings().get("performance.low_priority", True):
+            return {}
+    except Exception:  # pragma: no cover
+        pass
+
+    if sys.platform.startswith("win"):
+        flag = getattr(subprocess, "BELOW_NORMAL_PRIORITY_CLASS", None)
+        return {"creationflags": flag} if flag else {}
+
+    import os
+
+    return {"preexec_fn": lambda: os.nice(10)}
+
+
 def run(
     args: Sequence[str],
     *,
@@ -108,6 +133,7 @@ def run(
             capture_output=capture,
             text=True,
             timeout=timeout,
+            **_low_priority_kwargs(),
         )
     except FileNotFoundError as exc:
         raise DependencyError(f"الأمر غير موجود: {args[0]}") from exc
@@ -123,12 +149,56 @@ def run(
     return proc
 
 
-def run_ffmpeg(args: Iterable[str], *, overwrite: bool = True, timeout: Optional[int] = None):
-    """ينفّذ ffmpeg مع أعلام صامتة موحّدة."""
+def cpu_budget(settings: Optional["Settings"] = None) -> int:
+    """عدد الخيوط المسموح لـffmpeg باستخدامها.
+
+    بلا هذا الحدّ يلتهم ffmpeg **كل** أنوية المعالج (قِسناه: 192% استغلال
+    على آلة بنواتين). الحدّ وحده لا يُسقط الاستهلاك إلى النصف — قياسٌ فعلي
+    أعطى 160% حتى مع ``-threads 1`` لأن libx264 يوزّع على مستويات متعددة —
+    لكنه يقلّل المنافسة، والأهم أنه يقترن بخفض أولوية العملية
+    (``performance.low_priority``) وهو ما يحفظ استجابة الجهاز فعلياً.
+
+    ``performance.threads``:
+        0  = تلقائي (كل الأنوية ناقص واحدة، بحدٍّ أدنى 1)
+        n  = عدد صريح
+        -1 = بلا حدّ (السلوك القديم: كل الأنوية)
+    """
+    import os
+
+    try:
+        from .config import load_settings
+
+        settings = settings or load_settings()
+        configured = int(settings.get("performance.threads", 0))
+    except Exception:  # pragma: no cover - الإعدادات غير متاحة
+        configured = 0
+
+    if configured > 0:
+        return configured
+    if configured < 0:
+        return 0  # 0 في ffmpeg = تلقائي بلا قيد
+
+    total = os.cpu_count() or 2
+    return max(1, total - 1)
+
+
+def run_ffmpeg(
+    args: Iterable[str],
+    *,
+    overwrite: bool = True,
+    timeout: Optional[int] = None,
+    threads: Optional[int] = None,
+):
+    """ينفّذ ffmpeg مع أعلام صامتة موحّدة وحدٍّ لاستهلاك المعالج."""
     base = [ffmpeg_bin(), "-hide_banner", "-loglevel", "error", "-nostdin"]
     if overwrite:
         base.append("-y")
-    return run([*base, *[str(a) for a in args]], timeout=timeout)
+
+    # حدّ الخيوط يُمرَّر مرة واحدة هنا فيشمل كل استدعاءات ffmpeg في المشروع
+    limit = cpu_budget() if threads is None else threads
+    extra = ["-threads", str(limit)] if limit > 0 else []
+
+    return run([*base, *extra, *[str(a) for a in args]], timeout=timeout)
 
 
 # ============================================================ الاستعلام عن الوسائط
