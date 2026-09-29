@@ -175,7 +175,7 @@ branding:
   # مسار صورة PNG شفافة (نسبي للمشروع أو مطلق)
   logo_path: ""
   # top_left | top_right | bottom_left | bottom_right | top_center | bottom_center
-  logo_corner: top_right
+  logo_corner: "top_left"
   # حجم الشعار نسبةً لعرض الفيديو
   logo_scale: 0.14
   logo_opacity: 0.85

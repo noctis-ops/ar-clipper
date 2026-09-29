@@ -479,7 +479,8 @@ def suggest_followups(
     try:
         from core.analyze.llm_client import build_llm, llm_available
 
-        if llm_available(settings or load_settings()):
+        ready, _reason = llm_available(settings or load_settings())
+        if ready:
             llm = build_llm(settings or load_settings())
             joined = "\n".join(f"- {t}" for t in texts[:30])
             prompt = (
@@ -488,7 +489,7 @@ def suggest_followups(
                 "يشغل الجمهور. أجب بالعربية، فكرة واحدة في كل سطر، بلا ترقيم.\n\n"
                 f"{joined}"
             )
-            reply = llm.complete(prompt)
+            reply = llm.generate(prompt)
             ideas = [
                 line.strip(" -•\t") for line in (reply or "").splitlines()
                 if len(line.strip(" -•\t")) > 8

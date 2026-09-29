@@ -1674,6 +1674,51 @@ def campaign_ideas(
     console.print(Panel("\n".join(f"• {i}" for i in ideas), title="أفكار المتابعة", border_style="cyan"))
 
 
+@app.command("check", help="🔍 فحص جودة مقطع ناتج قبل النشر.")
+def check_command(
+    clip: str = typer.Argument(..., help="مسار المقطع (أو مجلد مقاطع)."),
+    platform: str = typer.Option("", "--platform", "-p", help="tiktok|youtube_shorts|instagram_reels|x"),
+    subtitles: str = typer.Option("", "--subtitles", "-s", help="ملف الترجمة للفحص."),
+    json_out: bool = typer.Option(False, "--json"),
+):
+    setup_logging("WARNING", force=True)
+    from core.quality import check_clip
+
+    target = Path(clip)
+    paths = sorted(target.glob("**/*.mp4")) if target.is_dir() else [target]
+    if not paths:
+        _fail(ArClipperError(f"لا مقاطع في: {clip}"))
+        return
+
+    reports = [
+        check_clip(p, platform=platform, subtitle_path=subtitles or None)
+        for p in paths
+    ]
+    if json_out:
+        console.print_json(data=[r.to_dict() for r in reports])
+        return
+
+    icons = {"ok": "✅", "warn": "⚠️", "fail": "❌"}
+    for report in reports:
+        color = "green" if report.score >= 85 else ("yellow" if report.score >= 60 else "red")
+        table = Table(
+            title=f"{Path(report.clip_path).name} — [{color}]{report.score}/100[/]",
+            header_style="bold magenta",
+        )
+        table.add_column("الفحص", style="cyan")
+        table.add_column("", justify="center")
+        table.add_column("التفصيل", overflow="fold")
+        for c in report.checks:
+            table.add_row(c.name, icons.get(c.status, "?"), c.detail)
+        console.print(table)
+
+    worst = min(r.score for r in reports)
+    if worst < 60:
+        console.print("[red]بعض المقاطع تحتاج مراجعة قبل النشر.[/]")
+        raise typer.Exit(code=1)
+    console.print("[green]✅ جاهزة للنشر.[/]")
+
+
 @app.command("clean", help="🧹 تنظيف الملفات المؤقتة وعرض استهلاك المساحة.")
 def clean_command(
     hours: float = typer.Option(
