@@ -60,3 +60,8 @@ Thumbs.db
 .vscode/
 *.swp
 *~
+
+# قاعدة بيانات المكتبة والحملات (بيانات المستخدم)
+data/arclipper.db
+data/arclipper.db-wal
+data/arclipper.db-shm

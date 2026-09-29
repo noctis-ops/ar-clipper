@@ -37,6 +37,22 @@ def build_audio_filter(
     """
     parts: List[str] = []
 
+    # تحسين وضوح الكلام — يُطبَّق قبل التطبيع ليعمل الأخير على صوت نظيف.
+    # كلها فلاتر ffmpeg مدمجة: صفر تبعيات، صفر تنزيل.
+    if settings.get("polish.enhance_voice", False):
+        # قطع الهدير تحت 80Hz (ضجيج المكيّف/الطاولة) والهسهسة فوق 12kHz
+        parts.append("highpass=f=80")
+        parts.append("lowpass=f=12000")
+        # مخفّض ضجيج طيفي: nr شدة الخفض، nf أرضية الضجيج المقدَّرة
+        strength = float(settings.get("polish.denoise_strength", 12.0))
+        if strength > 0:
+            parts.append(f"afftdn=nr={strength:.0f}:nf=-25")
+        # ضغط ديناميكي خفيف يرفع الهمس ويكبح الصياح
+        if settings.get("polish.compress_voice", True):
+            parts.append(
+                "acompressor=threshold=-18dB:ratio=3:attack=15:release=250:makeup=2"
+            )
+
     if include_loudnorm and settings.get("polish.normalize_audio", True):
         target_i = float(settings.get("polish.loudness_target", -16.0))
         target_tp = float(settings.get("polish.true_peak", -1.5))

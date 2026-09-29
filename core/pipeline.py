@@ -404,6 +404,22 @@ def stage_render_clip(
         except Exception as exc:  # الصورة المصغّرة تحسين، لا تُفشل الإنتاج
             log.warning("تعذّر توليد الصورة المصغّرة (%s).", exc)
 
+    # ---------------------------------------------- 7) الفهرسة في المكتبة (المرحلة 5)
+    if settings.get("store.enabled", True) and settings.get("store.auto_index", True):
+        try:
+            from library.manager import index_clip
+
+            index_clip(
+                result,
+                video_key=ctx.workspace,
+                settings=settings,
+                title=request.title or "",
+                hook=request.hook or "",
+            )
+            stages.append("index")
+        except Exception as exc:  # الفهرسة تحسين، لا تُفشل الإنتاج
+            log.debug("تعذّرت فهرسة المقطع: %s", exc)
+
     result.stages = stages
     return result
 
@@ -457,6 +473,21 @@ def run_pipeline(
     else:
         log.info("لا حاجة للتفريغ في هذا المسار — تم تخطّيه لتوفير الوقت.")
         ctx.transcript = None
+
+    # 2.5) فهرسة المصدر والترانسكربت في المكتبة (المرحلة 5)
+    if settings.get("store.enabled", True) and settings.get("store.auto_index", True):
+        try:
+            from library.manager import index_transcript, index_video
+
+            index_video(ctx.source, settings=settings, workspace=ctx.workspace)
+            if ctx.transcript is not None:
+                index_transcript(
+                    ctx.transcript, video_key=ctx.workspace,
+                    track="source", path=str(ctx.transcript_path or ""),
+                    settings=settings,
+                )
+        except Exception as exc:
+            log.debug("تعذّرت فهرسة المصدر: %s", exc)
 
     # 3) إنتاج كل مقطع
     results: List[ClipResult] = []

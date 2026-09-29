@@ -260,6 +260,17 @@ def suggest_clips(
             )
         )
 
+    # 7.5) إسقاط المقترحات المكرّرة (نص متشابه أو تداخل زمني)
+    if settings.get("dedupe.enabled", True) and len(suggestions) > 1:
+        from .analyze.dedupe import deduplicate
+
+        dedupe_result = deduplicate(suggestions, settings=settings)
+        if dedupe_result.removed:
+            suggestions = dedupe_result.kept
+            # إعادة ترقيم المؤشرات حتى يبقى --pick صحيحاً
+            for new_index, suggestion in enumerate(suggestions):
+                suggestion.index = new_index
+
     # 8) فحص السلامة
     report = None
     want_safety = safety if safety is not None else settings.get("safety.enabled", True)

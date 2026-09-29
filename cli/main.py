@@ -1239,6 +1239,441 @@ def templates_command():
     )
 
 
+# ============================================================ المكتبة والطابور (المرحلة 5)
+
+library_app = typer.Typer(help="📚 المكتبة والبحث عبر كل ما أنتجته.")
+queue_app = typer.Typer(help="⏳ طابور معالجة عدة فيديوهات بالتتابع.")
+campaign_app = typer.Typer(help="💰 الحملات وتتبّع الأرباح.")
+app.add_typer(library_app, name="library")
+app.add_typer(queue_app, name="queue")
+app.add_typer(campaign_app, name="campaign")
+
+
+@library_app.command("list", help="عرض الفيديوهات المسجَّلة في المكتبة.")
+def library_list(
+    limit: int = typer.Option(50, "--limit", "-n", help="أقصى عدد."),
+    json_out: bool = typer.Option(False, "--json", help="مخرَج JSON."),
+):
+    setup_logging("WARNING", force=True)
+    from library.manager import list_videos
+
+    videos = list_videos(limit=limit)
+    if json_out:
+        console.print_json(data=[v.to_dict() for v in videos])
+        return
+    if not videos:
+        console.print("[yellow]المكتبة فارغة — أنتج مقطعاً أولاً.[/]")
+        return
+
+    table = Table(title=f"المكتبة ({len(videos)} فيديو)", header_style="bold magenta")
+    table.add_column("المعرّف", style="cyan", overflow="fold")
+    table.add_column("العنوان", overflow="fold")
+    table.add_column("المدة", justify="right")
+    table.add_column("مقاطع", justify="right")
+    for v in videos:
+        table.add_row(v.video_id, v.title or "—", human_duration(v.duration), str(v.clips_count))
+    console.print(table)
+
+
+@library_app.command("clips", help="عرض المقاطع المُنتجة.")
+def library_clips(
+    video: str = typer.Option("", "--video", "-v", help="تصفية بفيديو."),
+    campaign: str = typer.Option("", "--campaign", "-c", help="تصفية بحملة."),
+    limit: int = typer.Option(50, "--limit", "-n"),
+    json_out: bool = typer.Option(False, "--json"),
+):
+    setup_logging("WARNING", force=True)
+    from library.manager import list_clips
+
+    clips = list_clips(video_key=video, campaign=campaign, limit=limit)
+    if json_out:
+        console.print_json(data=clips)
+        return
+    if not clips:
+        console.print("[yellow]لا مقاطع مطابقة.[/]")
+        return
+
+    table = Table(title=f"المقاطع ({len(clips)})", header_style="bold magenta")
+    table.add_column("المقطع", style="cyan")
+    table.add_column("المصدر", overflow="fold")
+    table.add_column("المدة", justify="right")
+    table.add_column("الحملة")
+    for c in clips:
+        table.add_row(
+            c["clip_id"], c.get("source_key") or "—",
+            human_duration(c.get("duration") or 0), c.get("campaign_name") or "—",
+        )
+    console.print(table)
+
+
+@library_app.command("search", help="🔎 بحث نصي داخل كل الترانسكربتات.")
+def library_search(
+    query: str = typer.Argument(..., help="ما تبحث عنه، مثال: الاستثمار"),
+    limit: int = typer.Option(15, "--limit", "-n"),
+    video: str = typer.Option("", "--video", "-v", help="حصر البحث بفيديو."),
+    exact: bool = typer.Option(False, "--exact", help="مطابقة حرفية بلا توسعة صرفية."),
+    json_out: bool = typer.Option(False, "--json"),
+):
+    setup_logging("WARNING", force=True)
+    from library.manager import search as lib_search
+
+    hits = lib_search(query, limit=limit, video_key=video, exact=exact)
+    if json_out:
+        console.print_json(data=[h.to_dict() for h in hits])
+        return
+    if not hits:
+        console.print(f"[yellow]لا نتائج لـ «{query}».[/]")
+        console.print("[dim]جرّب كلمة أقصر، أو تأكد أن الفيديو فُهرس (يحتاج ترجمة مفعّلة).[/]")
+        return
+
+    table = Table(title=f"نتائج «{query}» ({len(hits)})", header_style="bold magenta")
+    table.add_column("الفيديو", style="cyan", overflow="fold")
+    table.add_column("الوقت", justify="right")
+    table.add_column("المقطع النصي", overflow="fold")
+    for h in hits:
+        d = h.to_dict()
+        table.add_row(h.video_id, d["timestamp"], h.snippet or h.text[:90])
+    console.print(table)
+    console.print(f"\n[dim]لإنتاج مقطع من نتيجة: [cyan]{_cmd('clip')} <المصدر> -s <الوقت> -e <النهاية>[/][/]")
+
+
+@library_app.command("stats", help="إحصاءات المكتبة.")
+def library_stats(json_out: bool = typer.Option(False, "--json")):
+    setup_logging("WARNING", force=True)
+    from library.manager import stats as lib_stats
+
+    data = lib_stats()
+    if json_out:
+        console.print_json(data=data)
+        return
+    table = Table(title="إحصاءات المكتبة", header_style="bold magenta")
+    table.add_column("البند", style="cyan")
+    table.add_column("القيمة", justify="right")
+    labels = {
+        "videos": "فيديوهات", "clips": "مقاطع مُنتجة", "transcripts": "ترانسكربتات",
+        "indexed_segments": "جمل مفهرسة", "campaigns": "حملات", "posts": "منشورات",
+    }
+    for key, label in labels.items():
+        table.add_row(label, str(data.get(key, 0)))
+    table.add_row("إجمالي مدة المقاطع", human_duration(data.get("total_clip_seconds", 0)))
+    console.print(table)
+
+
+@queue_app.command("add", help="إضافة مصدر أو أكثر للطابور.")
+def queue_add(
+    sources: List[str] = typer.Argument(..., help="روابط أو ملفات."),
+    count: int = typer.Option(3, "--count", "-c", help="عدد المقاطع لكل فيديو."),
+    preset: str = typer.Option("campaign", "--preset", "-p"),
+    template: str = typer.Option("", "--template", "-T"),
+    face_track: bool = typer.Option(False, "--face-track"),
+    animated_subs: bool = typer.Option(False, "--animated-subs"),
+    license_key: str = typer.Option("personal_test", "--license", "-L"),
+    priority: int = typer.Option(0, "--priority", help="الأعلى يُنفَّذ أولاً."),
+):
+    setup_logging("INFO", force=True)
+    from library.queue import enqueue
+
+    options = {
+        "count": count, "preset": preset, "license": license_key,
+        "face_track": face_track, "animated_subs": animated_subs,
+    }
+    if template:
+        options["template"] = template
+
+    ids = [enqueue(src, options=options, priority=priority) for src in sources]
+    console.print(f"[green]✅ أُضيف {len(ids)} مصدر للطابور.[/]")
+    console.print(f"[dim]شغّله بـ: [cyan]{_cmd('queue run')}[/][/]")
+
+
+@queue_app.command("list", help="عرض الطابور.")
+def queue_list(
+    status: str = typer.Option("", "--status", "-s", help="pending|running|done|failed"),
+    json_out: bool = typer.Option(False, "--json"),
+):
+    setup_logging("WARNING", force=True)
+    from library.queue import list_items, summary
+
+    items = list_items(status=status)
+    if json_out:
+        console.print_json(data=[i.to_dict() for i in items])
+        return
+
+    counts = summary()
+    if not items:
+        console.print("[yellow]الطابور فارغ.[/]")
+        return
+
+    icons = {"pending": "⏳", "running": "▶", "done": "✅", "failed": "❌", "cancelled": "⊘"}
+    table = Table(title=f"الطابور ({counts.get('total', 0)})", header_style="bold magenta")
+    table.add_column("#", justify="right", style="cyan")
+    table.add_column("الحالة", justify="center")
+    table.add_column("المصدر", overflow="fold")
+    table.add_column("ملاحظة", overflow="fold")
+    for it in items:
+        note = it.error.splitlines()[-1][:60] if it.error else (it.result or "")
+        table.add_row(str(it.id), f"{icons.get(it.status, '?')} {it.status}", it.source, note)
+    console.print(table)
+
+
+@queue_app.command("run", help="▶ تشغيل الطابور حتى ينتهي.")
+def queue_run(
+    limit: int = typer.Option(0, "--limit", "-n", help="أقصى عدد مهام (0 = الكل)."),
+    stop_on_error: bool = typer.Option(False, "--stop-on-error"),
+):
+    setup_logging("INFO", force=True)
+    from library.queue import run_queue, summary
+
+    pending = summary().get("pending", 0)
+    if not pending:
+        console.print("[yellow]لا مهام معلّقة.[/]")
+        return
+
+    console.print(Panel(f"بدء معالجة {pending} مهمة — يمكنك ترك الجهاز يعمل.", style="cyan"))
+    run = run_queue(limit=limit, continue_on_error=not stop_on_error)
+
+    table = Table(title="حصيلة الطابور", header_style="bold magenta")
+    table.add_column("البند", style="cyan")
+    table.add_column("القيمة", justify="right")
+    table.add_row("عولجت", str(run.processed))
+    table.add_row("نجحت", f"[green]{run.succeeded}[/]")
+    table.add_row("فشلت", f"[red]{run.failed}[/]" if run.failed else "0")
+    table.add_row("مقاطع مُنتجة", str(run.clips))
+    table.add_row("الزمن", human_duration(run.elapsed))
+    console.print(table)
+    for err in run.errors[:5]:
+        console.print(f"[red]  • {err}[/]")
+
+
+@queue_app.command("clear", help="حذف المهام المنتهية من الطابور.")
+def queue_clear(
+    status: str = typer.Option("", "--status", "-s", help="حالة محددة (افتراضياً المنتهية)."),
+):
+    setup_logging("WARNING", force=True)
+    from library.queue import clear as queue_clear_items
+
+    n = queue_clear_items(status=status)
+    console.print(f"[green]حُذفت {n} مهمة.[/]")
+
+
+@queue_app.command("cancel", help="إلغاء مهمة معلّقة.")
+def queue_cancel(item_id: int = typer.Argument(..., help="رقم المهمة.")):
+    setup_logging("WARNING", force=True)
+    from library.queue import cancel as queue_cancel_item
+
+    if queue_cancel_item(item_id):
+        console.print(f"[green]أُلغيت المهمة #{item_id}.[/]")
+    else:
+        console.print(f"[yellow]المهمة #{item_id} غير معلّقة أو غير موجودة.[/]")
+
+
+# ============================================================ الحملات (المرحلة 4)
+
+
+@campaign_app.command("add", help="إضافة حملة جديدة.")
+def campaign_add(
+    name: str = typer.Argument(..., help="اسم الحملة."),
+    rate: float = typer.Option(..., "--rate", "-r", help="السعر لكل 1000 مشاهدة."),
+    budget: float = typer.Option(0.0, "--budget", "-b"),
+    link: str = typer.Option("", "--link", "-l", help="رابط الحملة."),
+    currency: str = typer.Option("USD", "--currency"),
+    notes: str = typer.Option("", "--notes", help="شروط الحملة."),
+):
+    setup_logging("WARNING", force=True)
+    from campaign.manager import add_campaign
+
+    try:
+        add_campaign(
+            name, rate_per_1000_views=rate, budget=budget,
+            platform_link=link, currency=currency, rules_notes=notes,
+        )
+    except ArClipperError as exc:
+        _fail(exc)
+        return
+    console.print(f"[green]✅ أُضيفت الحملة «{name}» بسعر {rate} {currency}/1000 مشاهدة.[/]")
+
+
+@campaign_app.command("list", help="عرض الحملات.")
+def campaign_list(json_out: bool = typer.Option(False, "--json")):
+    setup_logging("WARNING", force=True)
+    from campaign.manager import list_campaigns
+
+    campaigns = list_campaigns()
+    if json_out:
+        console.print_json(data=[c.to_dict() for c in campaigns])
+        return
+    if not campaigns:
+        console.print("[yellow]لا حملات — أضف واحدة بـ campaign add.[/]")
+        return
+
+    table = Table(title=f"الحملات ({len(campaigns)})", header_style="bold magenta")
+    table.add_column("الاسم", style="cyan")
+    table.add_column("السعر/1000", justify="right")
+    table.add_column("الميزانية", justify="right")
+    table.add_column("الحالة")
+    for c in campaigns:
+        table.add_row(
+            c.name, f"{c.rate_per_1000_views:.2f} {c.currency}",
+            f"{c.budget:,.0f}" if c.budget else "—", c.status,
+        )
+    console.print(table)
+
+
+@campaign_app.command("post", help="تسجيل منشور بعد نشره.")
+def campaign_post(
+    clip: str = typer.Argument(..., help="معرّف المقطع."),
+    platform: str = typer.Option(..., "--platform", "-p", help="tiktok|youtube|instagram|x"),
+    link: str = typer.Option("", "--link", "-l", help="رابط المنشور."),
+    views: int = typer.Option(0, "--views", "-v"),
+    campaign_name: str = typer.Option("", "--campaign", "-c"),
+    status: str = typer.Option("pending", "--status", "-s"),
+):
+    setup_logging("WARNING", force=True)
+    from campaign.manager import add_post
+
+    try:
+        post_id = add_post(
+            clip, platform=platform, post_link=link, views=views,
+            status=status, campaign=campaign_name,
+        )
+    except ArClipperError as exc:
+        _fail(exc)
+        return
+    console.print(f"[green]✅ سُجّل المنشور #{post_id}.[/]")
+    console.print(f"[dim]حدّث المشاهدات لاحقاً: [cyan]{_cmd('campaign views')} {post_id} <العدد>[/][/]")
+
+
+@campaign_app.command("views", help="تحديث مشاهدات منشور.")
+def campaign_views(
+    post_id: int = typer.Argument(..., help="رقم المنشور."),
+    views: int = typer.Argument(..., help="عدد المشاهدات الحالي."),
+    status: str = typer.Option("", "--status", "-s", help="pending|accepted|rejected|paid"),
+):
+    setup_logging("WARNING", force=True)
+    from campaign.manager import update_post
+
+    try:
+        ok = update_post(post_id, views=views, status=status or None)
+    except ArClipperError as exc:
+        _fail(exc)
+        return
+    if ok:
+        console.print(f"[green]✅ حُدّث المنشور #{post_id}: {views:,} مشاهدة.[/]")
+    else:
+        console.print(f"[yellow]منشور غير موجود: #{post_id}[/]")
+
+
+@campaign_app.command("posts", help="عرض المنشورات.")
+def campaign_posts(
+    campaign_name: str = typer.Option("", "--campaign", "-c"),
+    json_out: bool = typer.Option(False, "--json"),
+):
+    setup_logging("WARNING", force=True)
+    from campaign.manager import list_posts
+
+    posts = list_posts(campaign=campaign_name)
+    if json_out:
+        console.print_json(data=posts)
+        return
+    if not posts:
+        console.print("[yellow]لا منشورات مسجَّلة.[/]")
+        return
+
+    icons = {"pending": "⏳", "accepted": "✅", "rejected": "❌", "paid": "💰"}
+    table = Table(title=f"المنشورات ({len(posts)})", header_style="bold magenta")
+    table.add_column("#", justify="right", style="cyan")
+    table.add_column("المقطع", overflow="fold")
+    table.add_column("المنصة")
+    table.add_column("المشاهدات", justify="right")
+    table.add_column("الأرباح", justify="right")
+    table.add_column("الحالة")
+    for p in posts:
+        table.add_row(
+            str(p["id"]), p.get("clip_key") or "—", p["platform"],
+            f"{p['views_count']:,}", f"{p['earning']:.2f}",
+            f"{icons.get(p['status'], '')} {p['status']}",
+        )
+    console.print(table)
+
+
+@campaign_app.command("report", help="💰 تقرير الأرباح الشامل.")
+def campaign_report(
+    accepted_only: bool = typer.Option(False, "--accepted-only", help="المقبولة فقط."),
+    json_out: bool = typer.Option(False, "--json"),
+):
+    setup_logging("WARNING", force=True)
+    from campaign.manager import earnings_report, totals
+
+    rows = earnings_report(only_accepted=accepted_only)
+    summary_data = totals()
+    if json_out:
+        console.print_json(data={"rows": [r.to_dict() for r in rows], "totals": summary_data})
+        return
+    if not rows:
+        console.print("[yellow]لا حملات بعد.[/]")
+        return
+
+    title = "تقرير الأرباح" + (" (المقبولة فقط)" if accepted_only else "")
+    table = Table(title=title, header_style="bold magenta")
+    table.add_column("الحملة", style="cyan")
+    table.add_column("منشورات", justify="right")
+    table.add_column("مشاهدات", justify="right")
+    table.add_column("الأرباح", justify="right")
+    table.add_column("من الميزانية", justify="right")
+    table.add_column("مقبول/معلّق/مرفوض", justify="center")
+    for r in rows:
+        d = r.to_dict()
+        table.add_row(
+            d["campaign"], str(d["posts"]), f"{d['views']:,}",
+            f"[green]{d['earning']:.2f}[/] {d['currency']}",
+            f"{d['budget_used_pct']}%" if d["budget"] else "—",
+            f"{d['accepted']}/{d['pending']}/{d['rejected']}",
+        )
+    console.print(table)
+
+    earnings = summary_data["earnings_by_currency"]
+    total_line = "، ".join(f"{v:,.2f} {k}" for k, v in earnings.items()) or "0"
+    console.print(
+        Panel(
+            f"الإجمالي: [bold green]{total_line}[/]\n"
+            f"{summary_data['views']:,} مشاهدة عبر {summary_data['posts']} منشور",
+            title="الحصيلة", border_style="green",
+        )
+    )
+
+
+@campaign_app.command("comment", help="إضافة تعليق جمهور على منشور.")
+def campaign_comment(
+    post_id: int = typer.Argument(...),
+    text: str = typer.Argument(..., help="نص التعليق."),
+    author: str = typer.Option("", "--author", "-a"),
+    likes: int = typer.Option(0, "--likes", "-l"),
+):
+    setup_logging("WARNING", force=True)
+    from campaign.manager import add_comment
+
+    try:
+        add_comment(post_id, text, author=author, likes=likes)
+    except ArClipperError as exc:
+        _fail(exc)
+        return
+    console.print("[green]✅ أُضيف التعليق.[/]")
+
+
+@campaign_app.command("ideas", help="💡 أفكار جزء ثانٍ من تعليقات الجمهور.")
+def campaign_ideas(
+    post_id: int = typer.Option(0, "--post", "-p", help="منشور محدّد (0 = الكل)."),
+    count: int = typer.Option(5, "--count", "-n"),
+):
+    setup_logging("WARNING", force=True)
+    from campaign.manager import suggest_followups
+
+    ideas = suggest_followups(post_id=post_id, max_ideas=count)
+    if not ideas:
+        console.print("[yellow]لا تعليقات مسجَّلة — أضفها بـ campaign comment.[/]")
+        return
+    console.print(Panel("\n".join(f"• {i}" for i in ideas), title="أفكار المتابعة", border_style="cyan"))
+
+
 @app.command("clean", help="🧹 تنظيف الملفات المؤقتة وعرض استهلاك المساحة.")
 def clean_command(
     hours: float = typer.Option(
