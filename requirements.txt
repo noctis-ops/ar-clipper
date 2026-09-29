@@ -69,3 +69,4 @@ uvicorn[standard]>=0.27.0
 # خطوط عربية أفضل للترجمة المحروقة (اختياري لكن مستحسن):
 #   sudo apt install fonts-noto-core fonts-kacst
 #   ثم غيّر subtitles.font_name في الإعدادات
+python-multipart>=0.0.6   # رفع الملفات في الواجهة (المرحلة 3)

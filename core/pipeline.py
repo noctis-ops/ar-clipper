@@ -294,10 +294,22 @@ def stage_render_clip(
     if options.reframe and settings.get("reframe.enabled", True):
         progress("reframe", "تحويل المقطع إلى مقاس 9:16")
         reframe_out = tmp_dir / f"{clip_id}__03_vertical.mp4"
+        # نوبات المتحدثين من Diarization (المرحلة 2) تفعّل التبديل الذكي
+        speaker_turns = None
+        if clip_transcript is not None:
+            turns = [
+                (float(seg.start), float(seg.end), seg.speaker)
+                for seg in clip_transcript.segments
+                if getattr(seg, "speaker", None)
+            ]
+            if len({t[2] for t in turns}) >= 2:
+                speaker_turns = turns
+
         current = reframe_video(
             current,
             reframe_out,
             settings=settings,
+            speaker_turns=speaker_turns,
             extra_video_filter="" if will_burn else fade_vf,
             extra_audio_filter="" if will_burn else fade_af,
             branding=brand_plan if brand_on_reframe else None,

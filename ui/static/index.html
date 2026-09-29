@@ -218,6 +218,14 @@
         <select id="template"></select>
         <div class="hint" id="tplDesc"></div>
 
+        <label>🎨 الشعار والعلامة المائية</label>
+        <div class="row">
+          <input type="file" id="logoFile" accept="image/png,image/jpeg,image/webp" style="flex:1" />
+          <button id="logoUp" style="width:auto; margin:0">ارفع</button>
+        </div>
+        <div class="hint" id="logoState">—</div>
+        <input id="brandHandle" placeholder="@حسابك (علامة مائية)" />
+
         <label>نص الصورة المصغّرة</label>
         <input id="hook" placeholder="اترك فارغاً لصورة بلا نص" />
 
@@ -357,6 +365,7 @@ async function init(){
 
   $('template').innerHTML = '<option value="">(الافتراضي)</option>' +
     TEMPLATES.map(t => `<option value="${t.key}">${t.label}</option>`).join('');
+  loadBranding();
   $('template').onchange = () => {
     const t = TEMPLATES.find(x => x.key === $('template').value);
     $('tplDesc').textContent = t ? t.description : '';
@@ -701,6 +710,37 @@ document.querySelectorAll('.tab').forEach(btn => {
 
 const esc = t => String(t == null ? '' : t)
   .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
+// ============================================================ الشعار
+async function loadBranding(){
+  try {
+    const b = await fetch('/api/branding').then(r => r.json());
+    $('logoState').textContent = b.has_logo
+      ? `✅ شعار محمّل (${b.corner}) — الهوية ${b.enabled ? 'مفعّلة' : 'معطّلة'}`
+      : 'لا شعار — ارفع صورة PNG شفافة لأفضل نتيجة.';
+    if (b.handle) $('brandHandle').value = b.handle;
+  } catch (e) {}
+}
+
+$('logoUp').onclick = async () => {
+  const f = $('logoFile').files[0];
+  if (!f) { $('logoState').textContent = 'اختر ملفاً أولاً.'; return; }
+  const fd = new FormData();
+  fd.append('file', f);
+  $('logoState').textContent = '⏳ جارٍ الرفع...';
+  const r = await fetch('/api/branding/logo', {method: 'POST', body: fd});
+  const d = await r.json();
+  if (!r.ok) { $('logoState').textContent = '❌ ' + (d.detail || 'فشل الرفع'); return; }
+  $('logoState').textContent = `✅ رُفع (${d.width}×${d.height}) — سيظهر في كل مقطع.`;
+};
+
+$('brandHandle').addEventListener('change', async () => {
+  await fetch('/api/branding', {
+    method: 'PATCH', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({handle: $('brandHandle').value.trim()}),
+  });
+  loadBranding();
+});
 
 // ============================================================ المكتبة
 async function loadLibrary(){

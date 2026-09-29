@@ -88,12 +88,19 @@ def build_reframe_filter(
 
 
 def _build_face_track_filter(
-    src: Path, info, *, out_w: int, out_h: int, settings: Settings
+    src: Path, info, *, out_w: int, out_h: int, settings: Settings,
+    speaker_turns=None,
 ) -> Tuple[str, str]:
-    """يبني فلتر تتبّع الوجه. يرجع ("", سبب) عند التعذّر ليتراجع المستدعي بأمان."""
+    """يبني فلتر تتبّع الوجه. يرجع ("", سبب) عند التعذّر ليتراجع المستدعي بأمان.
+
+    ``speaker_turns`` (من Diarization) يفعّل التبديل حسب من يتكلم بدل
+    اتّباع الوجه الأكبر.
+    """
     from .face_track import (
+        assign_speaker_faces,
         average_focus,
         build_dynamic_crop,
+        build_speaker_track,
         build_split_screen_filter,
         detect_dialogue,
         smooth_track,
@@ -135,6 +142,36 @@ def _build_face_track_filter(
                 ),
                 f"شاشة منقسمة — متحدثان (ثقة {layout.confidence:.0%})",
             )
+
+    # التبديل حسب المتحدث — للحالات التي **لا** تصلح لها الشاشة المنقسمة:
+    # متحدثون في مواضع متباعدة لا يظهرون معاً في كل إطار (كاميرات متعددة،
+    # أو شخص يدخل ويخرج). في اللقطة الثابتة التي يظهر فيها الجميع دائماً
+    # الشاشة المنقسمة أفضل: قِسناها فوجدنا التبديل يتذبذب بلا استقرار
+    # لأن الكاميرا تلاحق نوبات قصيرة متتالية.
+    if speaker_turns and settings.get("reframe.follow_speaker", True):
+        positions = assign_speaker_faces(tracked.samples, speaker_turns)
+        if len(positions) >= 2:
+            speaker_track = build_speaker_track(
+                speaker_turns, positions,
+                switch_lead=float(settings.get("reframe.switch_lead", 0.12)),
+                switch_duration=float(settings.get("reframe.switch_duration", 0.35)),
+            )
+            if speaker_track:
+                smoothed = smooth_track(
+                    speaker_track, window=1,
+                    max_step=float(settings.get("reframe.speaker_max_step", 0.6)),
+                )
+                crop_w, crop_h, _cx, _cy = compute_crop(
+                    info.width, info.height, out_w / out_h
+                )
+                expression = build_dynamic_crop(
+                    smoothed, src_w=info.width, src_h=info.height,
+                    crop_w=crop_w, crop_h=crop_h,
+                )
+                return (
+                    f"{expression},scale={out_w}:{out_h}:flags=lanczos,setsar=1",
+                    f"تتبّع المتحدث — {len(positions)} متحدثين",
+                )
 
     samples = smooth_track(
         tracked.samples,
@@ -183,6 +220,7 @@ def reframe(
     extra_video_filter: str = "",
     extra_audio_filter: str = "",
     branding=None,
+    speaker_turns=None,
 ) -> Path:
     """يحوّل الفيديو إلى المقاس العمودي المطلوب.
 
@@ -211,7 +249,8 @@ def reframe(
     applied_mode = "قص مركزي"
     if selected_mode == "face_track":
         vf, applied_mode = _build_face_track_filter(
-            src, info, out_w=out_w, out_h=out_h, settings=settings
+            src, info, out_w=out_w, out_h=out_h, settings=settings,
+            speaker_turns=speaker_turns,
         )
     if not vf:
         vf = build_reframe_filter(

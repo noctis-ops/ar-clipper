@@ -24,7 +24,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, StreamingResponse
 from pydantic import BaseModel
 
@@ -673,6 +673,141 @@ def api_earnings(accepted_only: bool = False) -> Dict[str, Any]:
         "totals": totals(),
         "posts": list_posts(),
     }
+
+
+@app.post("/api/branding/logo")
+async def api_upload_logo(file: UploadFile = File(...)) -> Dict[str, Any]:
+    """يرفع شعاراً ويحفظه للاستخدام في الهوية البصرية.
+
+    كان الشعار يتطلب تحرير settings.yaml يدوياً — وهو حاجز أمام غير
+    التقنيين. الملف يُحفظ في مجلد المشروع ويُضبط مساره في الإعدادات.
+    """
+    allowed = {".png", ".jpg", ".jpeg", ".webp"}
+    suffix = Path(file.filename or "logo.png").suffix.lower()
+    if suffix not in allowed:
+        raise HTTPException(
+            status_code=400,
+            detail=f"صيغة غير مدعومة: {suffix}. المتاح: {'، '.join(sorted(allowed))}",
+        )
+
+    payload = await file.read()
+    if len(payload) > 8 * 1024 * 1024:
+        raise HTTPException(status_code=400, detail="الملف أكبر من 8 ميغابايت.")
+    if not payload:
+        raise HTTPException(status_code=400, detail="الملف فارغ.")
+
+    settings = load_settings()
+    assets = settings.root / "data" / "branding"
+    assets.mkdir(parents=True, exist_ok=True)
+    target = assets / f"logo{suffix}"
+    target.write_bytes(payload)
+
+    # تحقّق أن الملف صورة صالحة فعلاً لا مجرد امتداد صحيح
+    try:
+        from PIL import Image
+
+        with Image.open(target) as img:
+            width, height = img.size
+    except Exception:
+        target.unlink(missing_ok=True)
+        raise HTTPException(status_code=400, detail="الملف ليس صورة صالحة.")
+
+    _persist_setting("branding.logo_path", str(target))
+    _persist_setting("branding.enabled", True)
+    return {"path": str(target), "width": width, "height": height}
+
+
+@app.get("/api/branding")
+def api_branding_get() -> Dict[str, Any]:
+    settings = load_settings()
+    logo = settings.get("branding.logo_path", "")
+    return {
+        "enabled": bool(settings.get("branding.enabled", False)),
+        "logo_path": logo,
+        "has_logo": bool(logo and Path(logo).exists()),
+        "handle": settings.get("branding.handle", ""),
+        "corner": settings.get("branding.logo_corner", "top_right"),
+    }
+
+
+class BrandingPayload(BaseModel):
+    enabled: Optional[bool] = None
+    handle: Optional[str] = None
+    corner: Optional[str] = None
+
+
+@app.patch("/api/branding")
+def api_branding_update(payload: BrandingPayload) -> Dict[str, Any]:
+    from core.design.branding import CORNERS
+
+    if payload.corner is not None and payload.corner not in CORNERS:
+        raise HTTPException(
+            status_code=400, detail=f"ركن غير معروف. المتاح: {'، '.join(CORNERS)}"
+        )
+    if payload.enabled is not None:
+        _persist_setting("branding.enabled", payload.enabled)
+    if payload.handle is not None:
+        _persist_setting("branding.handle", payload.handle.strip())
+    if payload.corner is not None:
+        _persist_setting("branding.logo_corner", payload.corner)
+    return api_branding_get()
+
+
+def _persist_setting(dotted: str, value: Any) -> None:
+    """يكتب إعداداً في settings.yaml **مع الحفاظ على التعليقات**.
+
+    ``yaml.safe_dump`` يمحو كل التعليقات (122 تعليقاً عربياً في ملفنا)
+    لأن PyYAML لا يحتفظ بها في شجرة التحليل. لذلك نعدّل **السطر المطلوب
+    فقط** نصياً: نجد القسم ثم المفتاح بداخله ونستبدل قيمته.
+    """
+    import re
+
+    settings = load_settings()
+    path = Path(settings.source_path) if settings.source_path else None
+    if not path or not path.exists():
+        return
+
+    parts = dotted.split(".")
+    if len(parts) != 2:  # ندعم section.key فقط — يكفي لحالتنا
+        return
+    section, key = parts
+
+    if isinstance(value, bool):
+        rendered = "true" if value else "false"
+    elif isinstance(value, (int, float)):
+        rendered = str(value)
+    else:
+        text = str(value).replace('"', '\\"')
+        rendered = f'"{text}"'
+
+    lines = path.read_text(encoding="utf-8").splitlines()
+    in_section = False
+    key_pattern = re.compile(rf"^(\s+){re.escape(key)}\s*:")
+    written = False
+
+    for index, line in enumerate(lines):
+        if re.match(rf"^{re.escape(section)}\s*:", line):
+            in_section = True
+            continue
+        if in_section:
+            # سطر بلا مسافة بادئة وغير فارغ = بداية قسم جديد
+            if line.strip() and not line[0].isspace() and not line.startswith("#"):
+                break
+            match = key_pattern.match(line)
+            if match:
+                comment = ""
+                if "#" in line:
+                    comment = "  " + line[line.index("#"):]
+                lines[index] = f"{match.group(1)}{key}: {rendered}{comment}"
+                written = True
+                break
+
+    if not written:
+        log.warning("تعذّر حفظ %s — المفتاح غير موجود في الملف.", dotted)
+        return
+
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    load_settings(force=True)  # أبطِل الكاش فتُقرأ القيمة الجديدة
 
 
 @app.get("/api/health")

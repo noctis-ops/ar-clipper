@@ -1032,3 +1032,135 @@ class TestGeneratedSamples:
             gray = cv2.cvtColor(face, cv2.COLOR_BGR2GRAY)
             found = cascade.detectMultiScale(gray, 1.1, 4, minSize=(30, 30))
             assert len(found) >= 1, f"الوجه المُولَّد بحجم {size} غير قابل للكشف"
+
+
+class TestSpeakerAwareTracking:
+    """التبديل حسب المتحدث — يكمل الخطوة 1 من المرحلة 3."""
+
+    def _samples(self, count=40):
+        from core.reframe.face_track import FaceSample
+
+        return [
+            FaceSample(
+                time=i * 0.5, center_x=0.25, center_y=0.45,
+                all_faces=[(0.25, 0.45, 0.18), (0.75, 0.45, 0.17)],
+            )
+            for i in range(count)
+        ]
+
+    def test_assigns_distinct_positions(self):
+        """كل متحدث يجب أن يأخذ موضعاً مختلفاً، وإلا فالتبديل بلا معنى."""
+        from core.reframe.face_track import assign_speaker_faces
+
+        turns = [(0, 10, "A"), (10, 20, "B"), (20, 30, "A")]
+        positions = assign_speaker_faces(self._samples(), turns)
+        assert len(positions) == 2
+        assert positions["A"][0] != positions["B"][0]
+
+    def test_first_speaker_gets_leftmost(self):
+        from core.reframe.face_track import assign_speaker_faces
+
+        positions = assign_speaker_faces(self._samples(), [(0, 10, "A"), (10, 20, "B")])
+        assert positions["A"][0] < positions["B"][0]
+
+    def test_single_face_returns_empty(self):
+        from core.reframe.face_track import FaceSample, assign_speaker_faces
+
+        samples = [
+            FaceSample(time=i * 0.5, center_x=0.5, center_y=0.4, all_faces=[(0.5, 0.4, 0.2)])
+            for i in range(20)
+        ]
+        assert assign_speaker_faces(samples, [(0, 5, "A"), (5, 10, "B")]) == {}
+
+    def test_close_faces_rejected(self):
+        """وجهان متلاصقان = كشف مكرر، لا متحدثان."""
+        from core.reframe.face_track import FaceSample, assign_speaker_faces
+
+        samples = [
+            FaceSample(
+                time=i * 0.5, center_x=0.48, center_y=0.4,
+                all_faces=[(0.48, 0.4, 0.2), (0.53, 0.4, 0.19)],
+            )
+            for i in range(20)
+        ]
+        assert assign_speaker_faces(samples, [(0, 5, "A"), (5, 10, "B")]) == {}
+
+    def test_no_turns_returns_empty(self):
+        from core.reframe.face_track import assign_speaker_faces
+
+        assert assign_speaker_faces(self._samples(), []) == {}
+
+    def test_track_holds_then_jumps(self):
+        """الحركة يجب أن تكون: ثبات ← قفزة سريعة ← ثبات.
+
+        قياسٌ فعلي أظهر أن نقطة واحدة لكل نوبة تجعل الكاميرا تنزلق عبر
+        النوبة كلها (4.4 ثانية) فلا تستقر على أحد.
+        """
+        from core.reframe.face_track import build_speaker_track
+
+        turns = [(0, 4.4, "A"), (4.5, 8.9, "B")]
+        track = build_speaker_track(
+            turns, {"A": (0.25, 0.45), "B": (0.75, 0.45)}, switch_duration=0.35
+        )
+        times = [round(p.time, 2) for p in track]
+        assert times == sorted(times), "النقاط غير مرتبة زمنياً"
+        # ثبات على A حتى قرب النوبة الثانية
+        assert track[0].center_x == pytest.approx(0.25)
+        assert track[-1].center_x == pytest.approx(0.75)
+
+    def test_switch_is_fast_not_gradual(self):
+        from core.reframe.face_track import build_speaker_track
+
+        track = build_speaker_track(
+            [(0, 5, "A"), (5, 10, "B")],
+            {"A": (0.2, 0.4), "B": (0.8, 0.4)},
+            switch_duration=0.3,
+        )
+        # ابحث عن أسرع انتقال بين نقطتين
+        fastest = min(
+            (track[i + 1].time - track[i].time)
+            for i in range(len(track) - 1)
+            if abs(track[i + 1].center_x - track[i].center_x) > 0.3
+        )
+        assert fastest <= 0.5, f"القفزة بطيئة جداً: {fastest}s"
+
+    def test_switch_lead_is_anticipatory(self):
+        """الكاميرا تتحرك قبل الصوت بقليل — كما يفعل المخرج البشري."""
+        from core.reframe.face_track import build_speaker_track
+
+        track = build_speaker_track(
+            [(0, 5, "A"), (5, 10, "B")],
+            {"A": (0.2, 0.4), "B": (0.8, 0.4)},
+            switch_lead=0.5, switch_duration=0.2,
+        )
+        moved_at = next(p.time for p in track if p.center_x > 0.5)
+        assert moved_at < 5.0
+
+    def test_split_screen_takes_priority(self):
+        """في لقطة ثابتة يظهر فيها الجميع، الشاشة المنقسمة أفضل من التبديل.
+
+        قِسناه: التبديل يتذبذب بلا استقرار لأنه يلاحق نوبات قصيرة متتالية.
+        """
+        import inspect
+
+        from core.reframe.center import _build_face_track_filter
+
+        source = inspect.getsource(_build_face_track_filter)
+        # نقارن موضع **الاستدعاء** لا الاستيراد (قائمة الاستيراد أبجدية)
+        dialogue_call = source.index("layout = detect_dialogue(")
+        speaker_call = source.index("positions = assign_speaker_faces(")
+        assert dialogue_call < speaker_call
+
+    def test_reframe_accepts_speaker_turns(self):
+        import inspect
+
+        from core.reframe.center import reframe
+
+        assert "speaker_turns" in inspect.signature(reframe).parameters
+
+    def test_pipeline_extracts_turns(self):
+        import inspect
+
+        from core.pipeline import stage_render_clip
+
+        assert "speaker_turns" in inspect.getsource(stage_render_clip)

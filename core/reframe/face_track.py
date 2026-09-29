@@ -541,3 +541,138 @@ def build_split_screen_filter(
         f"{_pane(layout.bottom, 'sp1')};"
         f"[sp0][sp1]vstack=inputs=2"
     )
+
+
+# ============================================================ التبديل حسب المتحدث
+
+
+def assign_speaker_faces(
+    samples: Sequence[FaceSample],
+    turns: Sequence[Tuple[float, float, str]],
+    *,
+    min_gap: float = 0.25,
+) -> Dict[str, Tuple[float, float]]:
+    """يربط كل متحدث بموقع وجهه على الشاشة.
+
+    هذا ما يكمل الخطوة 1 من المرحلة 3: «التبديل الذكي بين الوجوه حسب من
+    يتكلم». المدخل ``turns`` = [(بداية، نهاية، معرّف المتحدث)] من
+    Diarization (المرحلة 2).
+
+    **المشكلة التي يحلّها التصميم:** في لقطة ثابتة يرى كل إطار *كل* الوجوه،
+    فحساب متوسط المواقع خلال نوبة متحدث يعطي نفس النتيجة لكل المتحدثين.
+    الحل: نحدّد أولاً **مجموعات المواقع الثابتة** على الشاشة (عناقيد)، ثم
+    نُسند لكل متحدث العنقود الأنسب. مع متحدثَين وعنقودين نستخدم الترتيب
+    الأفقي: أول من يتكلم يأخذ العنقود الأيسر — وهو تخمين، لكنه أفضل من
+    قطع أحدهما، ويُصحَّح يدوياً عند الحاجة.
+    """
+    if not samples or not turns:
+        return {}
+
+    # 1) اجمع كل مواقع الوجوه واعنقدها أفقياً
+    points: List[Tuple[float, float]] = []
+    for sample in samples:
+        faces = sample.all_faces or [(sample.center_x, sample.center_y, sample.size)]
+        points.extend((float(f[0]), float(f[1])) for f in faces)
+    if not points:
+        return {}
+
+    clusters: List[List[Tuple[float, float]]] = []
+    for point in sorted(points):
+        placed = False
+        for cluster in clusters:
+            if abs(cluster[0][0] - point[0]) <= min_gap / 2:
+                cluster.append(point)
+                placed = True
+                break
+        if not placed:
+            clusters.append([point])
+
+    # أبقِ العناقيد المعتبرة فقط (تجاهل الكشف العابر الخاطئ)
+    threshold = max(2, len(samples) // 10)
+    clusters = [c for c in clusters if len(c) >= threshold]
+    if len(clusters) < 2:
+        log.info("لم يُعثر على موضعَين ثابتين — التبديل حسب المتحدث غير ممكن.")
+        return {}
+
+    centers = sorted(
+        (
+            sorted(p[0] for p in cluster)[len(cluster) // 2],
+            sorted(p[1] for p in cluster)[len(cluster) // 2],
+        )
+        for cluster in clusters
+    )
+
+    spread = centers[-1][0] - centers[0][0]
+    if spread < min_gap:
+        log.info("مواقع الوجوه متقاربة (%.2f) — التبديل لن يضيف شيئاً.", spread)
+        return {}
+
+    # 2) رتّب المتحدثين بأول ظهور، وأسند العناقيد بالترتيب الأفقي
+    first_seen: Dict[str, float] = {}
+    for start, _end, speaker in turns:
+        if speaker and speaker not in first_seen:
+            first_seen[speaker] = float(start)
+    ordered = sorted(first_seen, key=lambda s: first_seen[s])
+
+    positions: Dict[str, Tuple[float, float]] = {}
+    for index, speaker in enumerate(ordered):
+        positions[speaker] = centers[index] if index < len(centers) else centers[-1]
+
+    log.info(
+        "مواقع المتحدثين: %s",
+        "، ".join(f"{k}@{v[0]:.2f}" for k, v in positions.items()),
+    )
+    return positions
+
+
+def build_speaker_track(
+    turns: Sequence[Tuple[float, float, str]],
+    positions: Dict[str, Tuple[float, float]],
+    *,
+    fallback: Tuple[float, float] = (0.5, 0.4),
+    switch_lead: float = 0.12,
+    switch_duration: float = 0.35,
+) -> List[FaceSample]:
+    """يبني مساراً يتبع **المتحدث الحالي** لا الوجه الأكبر.
+
+    **لماذا أربع نقاط لكل نوبة؟** ``build_dynamic_crop`` يُقحم خطياً بين
+    النقاط المتتالية. بنقطة واحدة لكل نوبة تنزلق الكاميرا عبر النوبة كلها
+    (قِسناه: 4.4 ثانية انزلاق) فلا تستقر على أحد. لذا نضع لكل نوبة:
+    بداية القفزة، نهايتها، ثم ثبات حتى آخر النوبة — فتصير الحركة "قفزة
+    سريعة ثم سكون"، وهو ما يفعله المخرج البشري.
+
+    ``switch_lead`` يبدأ الحركة قبل الصوت بقليل فتبدو استباقية.
+    """
+    ordered = sorted(turns, key=lambda t: float(t[0]))
+    track: List[FaceSample] = []
+
+    for index, (start, end, speaker) in enumerate(ordered):
+        position = positions.get(speaker or "", fallback)
+        start, end = float(start), float(end)
+        jump_start = max(0.0, start - switch_lead)
+        jump_end = jump_start + switch_duration
+
+        if index == 0:
+            # النوبة الأولى: ابدأ في مكانها مباشرةً بلا انزلاق من الوسط
+            track.append(FaceSample(time=0.0, center_x=position[0], center_y=position[1]))
+        else:
+            previous = positions.get(ordered[index - 1][2] or "", fallback)
+            # ثبّت على السابق حتى لحظة بدء القفزة
+            if track and track[-1].time < jump_start:
+                track.append(
+                    FaceSample(
+                        time=jump_start, center_x=previous[0], center_y=previous[1]
+                    )
+                )
+            # اكتمال القفزة بعد switch_duration
+            track.append(
+                FaceSample(time=jump_end, center_x=position[0], center_y=position[1])
+            )
+
+        # ثبات حتى نهاية النوبة
+        if end > (track[-1].time if track else 0.0):
+            track.append(
+                FaceSample(time=end, center_x=position[0], center_y=position[1])
+            )
+
+    return track

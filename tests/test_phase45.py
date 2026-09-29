@@ -853,3 +853,103 @@ class TestWebUiMarkup:
     def test_div_tags_balanced(self):
         html = self._html()
         assert html.count("<div") == html.count("</div>")
+
+
+class TestBrandingUpload:
+    """رفع الشعار من الواجهة — كان يتطلب تحرير YAML يدوياً."""
+
+    @pytest.fixture
+    @staticmethod
+    def client():
+        from fastapi.testclient import TestClient
+
+        from ui.server import app
+
+        return TestClient(app)
+
+    def _png(self, size=(64, 64)):
+        import io
+
+        from PIL import Image
+
+        buf = io.BytesIO()
+        Image.new("RGBA", size, (255, 120, 20, 255)).save(buf, "PNG")
+        buf.seek(0)
+        return buf
+
+    def test_get_branding_state(self, client):
+        data = client.get("/api/branding").json()
+        for key in ("enabled", "logo_path", "has_logo", "handle", "corner"):
+            assert key in data
+
+    def test_rejects_non_image_extension(self, client):
+        response = client.post(
+            "/api/branding/logo", files={"file": ("x.txt", b"hello", "text/plain")}
+        )
+        assert response.status_code == 400
+
+    def test_rejects_fake_image(self, client):
+        """امتداد صحيح لا يكفي — نتحقق أنها صورة فعلاً."""
+        response = client.post(
+            "/api/branding/logo",
+            files={"file": ("fake.png", b"not-an-image", "image/png")},
+        )
+        assert response.status_code == 400
+
+    def test_rejects_empty_file(self, client):
+        response = client.post(
+            "/api/branding/logo", files={"file": ("e.png", b"", "image/png")}
+        )
+        assert response.status_code == 400
+
+    def test_rejects_unknown_corner(self, client):
+        assert client.patch("/api/branding", json={"corner": "مجهول"}).status_code == 400
+
+    def test_accepts_valid_corner(self, client):
+        assert client.patch("/api/branding", json={"corner": "top_left"}).status_code == 200
+
+
+class TestSettingsPersistence:
+    """الكتابة في settings.yaml يجب ألّا تمحو التعليقات."""
+
+    def test_comments_preserved(self, tmp_path, monkeypatch):
+        import core.common.config as cfg
+        from ui.server import _persist_setting
+
+        original = Path("config/settings.yaml").read_text(encoding="utf-8")
+        target = tmp_path / "settings.yaml"
+        target.write_text(original, encoding="utf-8")
+
+        settings = cfg.load_settings()
+        monkeypatch.setattr(settings, "source_path", target)
+        monkeypatch.setattr(cfg, "load_settings", lambda *a, **k: settings)
+        import ui.server as srv
+
+        monkeypatch.setattr(srv, "load_settings", lambda *a, **k: settings)
+
+        before = original.count("#")
+        _persist_setting("branding.handle", "@x")
+        after = target.read_text(encoding="utf-8")
+        assert after.count("#") == before, "التعليقات فُقدت عند الحفظ"
+        assert '@x' in after
+
+    def test_only_target_line_changes(self, tmp_path, monkeypatch):
+        import core.common.config as cfg
+        import ui.server as srv
+        from ui.server import _persist_setting
+
+        original = Path("config/settings.yaml").read_text(encoding="utf-8")
+        target = tmp_path / "settings.yaml"
+        target.write_text(original, encoding="utf-8")
+
+        settings = cfg.load_settings()
+        monkeypatch.setattr(settings, "source_path", target)
+        monkeypatch.setattr(srv, "load_settings", lambda *a, **k: settings)
+
+        _persist_setting("branding.handle", "@only")
+        changed = [
+            (a, b)
+            for a, b in zip(original.splitlines(), target.read_text(encoding="utf-8").splitlines())
+            if a != b
+        ]
+        assert len(changed) == 1
