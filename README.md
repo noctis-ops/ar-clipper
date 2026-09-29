@@ -23,6 +23,7 @@
 | [`docs/TESTING-GUIDE.md`](docs/TESTING-GUIDE.md) | **دليل التثبيت والتجربة** — كل أمر فيه مُنفَّذ ومقيس |
 | [`docs/OPTIONAL-EXTRAS.md`](docs/OPTIONAL-EXTRAS.md) | **المتطلبات الاختيارية** — ما تحتاجه فعلاً وما لا تحتاجه، وبديل كل منها |
 | [`docs/GAP-VS-OPUSCLIP.md`](docs/GAP-VS-OPUSCLIP.md) | **الفجوة مقابل Opus Clip** — مقارنة 22 ميزة مبنية على بحث وفحص كود |
+| [`docs/REMAINING-WORK.md`](docs/REMAINING-WORK.md) | **الجرد الكامل** — ما أُنجز وما تبقّى من المراحل الست |
 | [`docs/REVIEW-PHASE-1-2.md` — مراجعة المرحلتين 1-2
 - `docs/REVIEW-PHASE-3.md`](docs/REVIEW-PHASE-1-2.md) | **مراجعة نقدية مقيسة** للمرحلتين 1 و2 — العيوب المكتشفة، الأداء بالأرقام، والاقتراحات |
 

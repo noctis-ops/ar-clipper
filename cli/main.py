@@ -187,6 +187,43 @@ def _print_results(results) -> None:
 # ============================================================ الأمر الرئيسي: clip
 
 
+# مقاسات قياسية لكل نسبة — الارتفاع/العرض مختاران ليطابقا ما تتوقعه المنصات
+ASPECT_SIZES = {
+    "9:16": (1080, 1920),   # TikTok · Reels · Shorts
+    "1:1": (1080, 1080),    # منشور مربّع
+    "4:5": (1080, 1350),    # إنستغرام (أطول مساحة مسموحة في التايملاين)
+    "16:9": (1920, 1080),   # يوتيوب الأفقي
+}
+
+
+def _apply_aspect(settings, value: str) -> None:
+    """يطبّق نسبة أبعاد على الإعدادات.
+
+    يقبل نسبةً معروفة (``1:1``) أو مقاساً صريحاً (``1080x1350``). المحرك
+    (``parse_aspect``/``compute_crop``) كان يدعم أي نسبة أصلاً؛ هذه الدالة
+    تكشف القدرة للمستخدم فقط.
+    """
+    text = value.strip().lower().replace(" ", "")
+
+    if "x" in text:  # مقاس صريح
+        try:
+            width, height = (int(p) for p in text.split("x", 1))
+        except ValueError:
+            raise ArClipperError(f"مقاس غير صالح: {value} (مثال صحيح: 1080x1350)")
+        if width < 16 or height < 16:
+            raise ArClipperError(f"مقاس صغير جداً: {value}")
+        ratio = f"{width}:{height}"
+    elif text in ASPECT_SIZES:
+        width, height = ASPECT_SIZES[text]
+        ratio = text
+    else:
+        known = "، ".join(ASPECT_SIZES)
+        raise ArClipperError(f"نسبة غير معروفة: {value}. المتاح: {known} أو مقاس مثل 1080x1350")
+
+    section = settings.data.setdefault("reframe", {})
+    section.update({"aspect": ratio, "width": width - width % 2, "height": height - height % 2})
+
+
 @app.command("clip", help="المسار الكامل: مصدر → مقطع عمودي 9:16 مترجم للعربية.")
 def clip_command(
     source: str = typer.Argument(..., help="رابط فيديو (YouTube...) أو مسار ملف محلي."),
@@ -236,6 +273,10 @@ def clip_command(
     ),
     face_track: bool = typer.Option(
         False, "--face-track", help="🎯 تتبّع وجه المتحدث بدل القص المركزي الثابت."
+    ),
+    aspect: Optional[str] = typer.Option(
+        None, "--aspect", "-a",
+        help="نسبة الأبعاد: 9:16 (افتراضي) | 1:1 | 16:9 | 4:5 — أو مقاس صريح 1080x1080.",
     ),
     animated_subs: bool = typer.Option(
         False, "--animated-subs", help="✨ ترجمة متحركة بأسلوب الكاريوكي."
@@ -320,6 +361,12 @@ def clip_command(
         options.thumbnail = False
     if no_branding:
         options.branding = False
+    if aspect:
+        try:
+            _apply_aspect(settings, aspect)
+        except ArClipperError as exc:
+            _fail(exc)
+            return
     if face_track:
         settings.data.setdefault("reframe", {})["mode"] = "face_track"
     if animated_subs:

@@ -317,3 +317,83 @@ class TestOptionalExtrasDoc:
 
         config = yaml.safe_load(Path("config/settings.yaml").read_text(encoding="utf-8"))
         assert config["silence"]["engine"] == "ffmpeg"
+
+
+class TestAspectRatios:
+    """نسب الأبعاد — المحرك كان يدعمها والناقص كشفها للمستخدم."""
+
+    def _settings(self):
+        from copy import deepcopy
+
+        from core.common.config import load_settings
+
+        return deepcopy(load_settings())
+
+    @pytest.mark.parametrize(
+        "value,expected",
+        [
+            ("9:16", (1080, 1920)),
+            ("1:1", (1080, 1080)),
+            ("4:5", (1080, 1350)),
+            ("16:9", (1920, 1080)),
+        ],
+    )
+    def test_known_ratios(self, value, expected):
+        from cli.main import _apply_aspect
+
+        settings = self._settings()
+        _apply_aspect(settings, value)
+        assert (settings.get("reframe.width"), settings.get("reframe.height")) == expected
+
+    def test_explicit_size(self):
+        from cli.main import _apply_aspect
+
+        settings = self._settings()
+        _apply_aspect(settings, "720x1280")
+        assert settings.get("reframe.width") == 720
+        assert settings.get("reframe.height") == 1280
+
+    def test_odd_dimensions_made_even(self):
+        """أبعاد فردية تكسر yuv420p."""
+        from cli.main import _apply_aspect
+
+        settings = self._settings()
+        _apply_aspect(settings, "721x1281")
+        assert settings.get("reframe.width") % 2 == 0
+        assert settings.get("reframe.height") % 2 == 0
+
+    def test_unknown_ratio_lists_options(self):
+        from cli.main import _apply_aspect
+        from core.common.errors import ArClipperError
+
+        with pytest.raises(ArClipperError) as exc:
+            self._settings() and _apply_aspect(self._settings(), "غلط")
+        assert "المتاح" in str(exc.value)
+
+    def test_malformed_size_rejected(self):
+        from cli.main import _apply_aspect
+        from core.common.errors import ArClipperError
+
+        with pytest.raises(ArClipperError):
+            _apply_aspect(self._settings(), "axb")
+
+    def test_tiny_size_rejected(self):
+        from cli.main import _apply_aspect
+        from core.common.errors import ArClipperError
+
+        with pytest.raises(ArClipperError):
+            _apply_aspect(self._settings(), "4x4")
+
+    def test_whitespace_and_case_tolerated(self):
+        from cli.main import _apply_aspect
+
+        settings = self._settings()
+        _apply_aspect(settings, " 1080X1080 ")
+        assert settings.get("reframe.width") == 1080
+
+    def test_flag_registered(self):
+        from typer.testing import CliRunner
+
+        from cli.main import app
+
+        assert "--aspect" in CliRunner().invoke(app, ["clip", "--help"]).output
