@@ -85,6 +85,23 @@
   .quote{margin-top:6px; font-size:12px; color:#9aa0a6}
   .quote summary{cursor:pointer}
   .quote p{margin:6px 0 0; line-height:1.7; max-height:120px; overflow:auto}
+  .tabs{display:flex; gap:8px; margin-bottom:18px; flex-wrap:wrap}
+  .tab{flex:none; width:auto; margin:0; padding:9px 18px; background:#1e1e22;
+    color:var(--muted); border:1px solid #2e2e34; border-radius:9px; cursor:pointer; font-size:14px}
+  .tab.on{background:var(--accent); color:#0b0b0d; border-color:var(--accent); font-weight:700}
+  .row{display:flex; gap:10px; align-items:flex-end}
+  .dataTable{width:100%; border-collapse:collapse; margin-top:10px; font-size:13px}
+  .dataTable th{text-align:right; padding:7px; border-bottom:2px solid #2e2e34; color:var(--muted); font-weight:600}
+  .dataTable td{padding:7px; border-bottom:1px solid #232327}
+  .dataTable tr:hover td{background:#1b1b1f}
+  .hitRow{padding:9px; border-bottom:1px solid #232327}
+  .hitRow b{color:var(--accent)}
+  .hitTime{color:var(--muted); font-size:12px; margin-left:8px}
+  .pill{display:inline-block; padding:2px 8px; border-radius:20px; font-size:11px}
+  .pill.ok{background:#0f3d24; color:#4ade80}
+  .pill.wait{background:#3d340f; color:#fbbf24}
+  .pill.bad{background:#3d1515; color:#f87171}
+  .bigNum{font-size:26px; font-weight:800; color:#4ade80}
   .chk{display:flex; align-items:center; gap:8px; margin:10px 0; cursor:pointer; font-weight:500}
   .chk input[type=checkbox]{width:18px; height:18px; flex:none; cursor:pointer; margin:0}
   .sug input[type=checkbox]{width:18px; height:18px; margin-top:3px; flex:none; cursor:pointer}
@@ -133,6 +150,14 @@
 </header>
 
 <div class="wrap">
+  <div class="tabs">
+    <button class="tab on" data-tab="produce">🎬 الإنتاج</button>
+    <button class="tab" data-tab="library">📚 المكتبة</button>
+    <button class="tab" data-tab="queue">⏳ الطابور</button>
+    <button class="tab" data-tab="money">💰 الأرباح</button>
+  </div>
+
+  <div id="tab-produce">
   <div class="modes">
     <button id="modeManual" class="on">✂️ أحدد التوقيت بنفسي</button>
     <button id="modeAuto">🤖 اقترح لي أفضل المقاطع</button>
@@ -229,6 +254,91 @@
         <h2>✅ النتيجة</h2>
         <div id="results"></div>
       </div>
+    </div>
+  </div>
+  </div><!-- /tab-produce -->
+
+  <!-- ============ المكتبة ============ -->
+  <div id="tab-library" style="display:none">
+    <div class="card">
+      <h2>🔎 ابحث في كل ما أنتجته</h2>
+      <p class="hint">بحث داخل نصوص كل الفيديوهات المعالَجة — «أين تحدّث عن الاستثمار؟»</p>
+      <div class="row">
+        <input id="libQ" placeholder="اكتب كلمة أو عبارة..." style="flex:1" />
+        <button id="libGo" style="width:auto; margin:0">بحث</button>
+      </div>
+      <div id="libHits"></div>
+    </div>
+    <div class="card">
+      <h2>📚 الفيديوهات المسجَّلة</h2>
+      <div id="libVideos"></div>
+      <div id="libStats" class="hint"></div>
+    </div>
+  </div>
+
+  <!-- ============ الطابور ============ -->
+  <div id="tab-queue" style="display:none">
+    <div class="card">
+      <h2>⏳ عالج عدة فيديوهات بالتتابع</h2>
+      <p class="hint">أضف المصادر (سطر لكل مصدر)، شغّل الطابور، واترك الجهاز يعمل.</p>
+      <textarea id="qSources" rows="4" placeholder="https://...&#10;C:/videos/podcast.mp4"></textarea>
+      <div class="row">
+        <div style="flex:1">
+          <label>مقاطع لكل فيديو</label>
+          <input id="qCount" type="number" value="3" min="1" max="10" />
+        </div>
+        <div style="flex:1">
+          <label>المسار الجاهز</label>
+          <select id="qPreset"></select>
+        </div>
+      </div>
+      <label class="chk"><input type="checkbox" id="qFace" /> 🎯 تتبّع الوجه</label>
+      <div class="row">
+        <button id="qAdd" style="margin:0">➕ أضف للطابور</button>
+        <button id="qRun" style="margin:0">▶ شغّل الطابور</button>
+      </div>
+      <div class="banner" id="qBanner"></div>
+    </div>
+    <div class="card">
+      <h2>قائمة المهام</h2>
+      <div id="qList"></div>
+    </div>
+  </div>
+
+  <!-- ============ الأرباح ============ -->
+  <div id="tab-money" style="display:none">
+    <div class="card">
+      <h2>💰 تقرير الأرباح</h2>
+      <div id="moneyTotals"></div>
+      <div id="moneyRows"></div>
+    </div>
+    <div class="card">
+      <h2>➕ حملة جديدة</h2>
+      <div class="row">
+        <div style="flex:2"><label>الاسم</label><input id="camName" placeholder="whop-tech" /></div>
+        <div style="flex:1"><label>السعر/1000</label><input id="camRate" type="number" step="0.01" value="1.00" /></div>
+        <div style="flex:1"><label>الميزانية</label><input id="camBudget" type="number" value="0" /></div>
+      </div>
+      <button id="camAdd">أضف الحملة</button>
+    </div>
+    <div class="card">
+      <h2>📤 تسجيل منشور</h2>
+      <div class="row">
+        <div style="flex:2"><label>معرّف المقطع</label><input id="postClip" placeholder="clip-01" /></div>
+        <div style="flex:1"><label>المنصة</label>
+          <select id="postPlatform">
+            <option>tiktok</option><option>youtube</option>
+            <option>instagram</option><option>x</option>
+          </select>
+        </div>
+      </div>
+      <div class="row">
+        <div style="flex:1"><label>المشاهدات</label><input id="postViews" type="number" value="0" /></div>
+        <div style="flex:2"><label>الحملة</label><select id="postCampaign"></select></div>
+      </div>
+      <button id="postAdd">سجّل المنشور</button>
+      <div class="banner" id="moneyBanner"></div>
+      <div id="postsList"></div>
     </div>
   </div>
 </div>
@@ -570,6 +680,217 @@ ar-clipper suggest "${$('source').value.trim()}" --produce</div>`);
 }
 
 init();
+
+// ============================================================ التبويبات
+const TABS = ['produce', 'library', 'queue', 'money'];
+let QUEUE_TIMER = null;
+
+document.querySelectorAll('.tab').forEach(btn => {
+  btn.onclick = () => {
+    const name = btn.dataset.tab;
+    document.querySelectorAll('.tab').forEach(b => b.classList.toggle('on', b === btn));
+    TABS.forEach(t => {
+      const el = $('tab-' + t);
+      if (el) el.style.display = (t === name) ? 'block' : 'none';
+    });
+    if (name === 'library') loadLibrary();
+    if (name === 'queue') { loadQueue(); startQueuePolling(); } else stopQueuePolling();
+    if (name === 'money') loadMoney();
+  };
+});
+
+const esc = t => String(t == null ? '' : t)
+  .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
+// ============================================================ المكتبة
+async function loadLibrary(){
+  try {
+    const [v, st] = await Promise.all([
+      fetch('/api/library/videos').then(r => r.json()),
+      fetch('/api/library/stats').then(r => r.json()),
+    ]);
+    const videos = v.videos || [];
+    $('libVideos').innerHTML = videos.length ? `
+      <table class="dataTable">
+        <tr><th>الفيديو</th><th>المدة</th><th>مقاطع</th></tr>
+        ${videos.map(x => `<tr>
+          <td>${esc(x.title || x.video_id)}</td>
+          <td>${fmt(x.duration)}</td>
+          <td>${x.clips_count}</td></tr>`).join('')}
+      </table>` : '<p class="hint">المكتبة فارغة — أنتج مقطعاً أولاً.</p>';
+    $('libStats').textContent =
+      `${st.videos} فيديو · ${st.clips} مقطع · ${st.indexed_segments} جملة مفهرسة`;
+  } catch (e) { $('libVideos').innerHTML = '<p class="hint">تعذّر تحميل المكتبة.</p>'; }
+}
+
+async function runSearch(){
+  const q = $('libQ').value.trim();
+  if (!q) return;
+  $('libHits').innerHTML = '<p class="hint">جارٍ البحث...</p>';
+  try {
+    const d = await fetch('/api/library/search?q=' + encodeURIComponent(q)).then(r => r.json());
+    if (!d.count) {
+      $('libHits').innerHTML = `<p class="hint">لا نتائج لـ «${esc(q)}».
+        تأكد أن الفيديو فُهرس (يحتاج ترجمة مفعّلة).</p>`;
+      return;
+    }
+    $('libHits').innerHTML = `<p class="hint">${d.count} نتيجة</p>` + d.hits.map(h => `
+      <div class="hitRow">
+        <span class="hitTime">${h.timestamp}</span>
+        ${esc(h.snippet || h.text).replace(/«/g, '<b>').replace(/»/g, '</b>')}
+        <div class="hint">${esc(h.video_id)}</div>
+      </div>`).join('');
+  } catch (e) { $('libHits').innerHTML = '<p class="hint">فشل البحث.</p>'; }
+}
+$('libGo').onclick = runSearch;
+$('libQ').addEventListener('keydown', e => { if (e.key === 'Enter') runSearch(); });
+
+// ============================================================ الطابور
+function startQueuePolling(){
+  stopQueuePolling();
+  QUEUE_TIMER = setInterval(loadQueue, 3000);
+}
+function stopQueuePolling(){
+  if (QUEUE_TIMER) { clearInterval(QUEUE_TIMER); QUEUE_TIMER = null; }
+}
+
+async function loadQueue(){
+  try {
+    const d = await fetch('/api/queue').then(r => r.json());
+    const icons = {pending:'⏳', running:'▶', done:'✅', failed:'❌', cancelled:'⊘'};
+    const items = d.items || [];
+    $('qList').innerHTML = items.length ? `
+      <table class="dataTable">
+        <tr><th>#</th><th>الحالة</th><th>المصدر</th><th></th></tr>
+        ${items.map(i => `<tr>
+          <td>${i.id}</td>
+          <td>${icons[i.status] || ''} ${i.status}</td>
+          <td style="word-break:break-all">${esc(i.source)}</td>
+          <td>${i.status === 'pending'
+            ? `<button onclick="cancelJob(${i.id})" style="width:auto;margin:0;padding:3px 9px;font-size:11px">إلغاء</button>`
+            : ''}</td></tr>`).join('')}
+      </table>` : '<p class="hint">الطابور فارغ.</p>';
+  } catch (e) {}
+}
+
+async function cancelJob(id){
+  await fetch(`/api/queue/${id}/cancel`, {method: 'POST'});
+  loadQueue();
+}
+
+$('qAdd').onclick = async () => {
+  const sources = $('qSources').value.split('\n').map(x => x.trim()).filter(Boolean);
+  if (!sources.length) { banner('qBanner', 'err', 'أضف مصدراً واحداً على الأقل.'); return; }
+  const d = await fetch('/api/queue', {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({
+      sources, count: +$('qCount').value,
+      preset: $('qPreset').value, face_track: $('qFace').checked,
+      license_key: $('license') ? $('license').value : 'personal_test',
+    }),
+  }).then(r => r.json());
+  banner('qBanner', 'ok', `أُضيف ${d.added} مصدر.`);
+  $('qSources').value = '';
+  loadQueue();
+};
+
+$('qRun').onclick = async () => {
+  const d = await fetch('/api/queue/run', {method: 'POST'}).then(r => r.json());
+  if (d.started) {
+    banner('qBanner', 'ok', `بدأت معالجة ${d.pending} مهمة — تابع الحالة أدناه.`);
+    startQueuePolling();
+  } else {
+    banner('qBanner', 'err', d.reason || 'لا مهام.');
+  }
+};
+
+function banner(id, kind, msg){
+  const el = $(id);
+  if (!el) return;
+  el.className = 'banner ' + kind;
+  el.textContent = msg;
+  el.style.display = 'block';
+}
+
+// ============================================================ الأرباح
+async function loadMoney(){
+  try {
+    const d = await fetch('/api/earnings').then(r => r.json());
+    const t = d.totals || {};
+    const money = Object.entries(t.earnings_by_currency || {})
+      .map(([c, v]) => `${v.toLocaleString()} ${c}`).join(' + ') || '0';
+    $('moneyTotals').innerHTML = `
+      <div class="bigNum">${money}</div>
+      <p class="hint">${(t.views || 0).toLocaleString()} مشاهدة عبر ${t.posts || 0} منشور
+        · ${t.accepted || 0} مقبول / ${t.pending || 0} معلّق / ${t.rejected || 0} مرفوض</p>`;
+
+    const rows = d.rows || [];
+    $('moneyRows').innerHTML = rows.length ? `
+      <table class="dataTable">
+        <tr><th>الحملة</th><th>منشورات</th><th>مشاهدات</th><th>الأرباح</th><th>الميزانية</th></tr>
+        ${rows.map(r => `<tr>
+          <td>${esc(r.campaign)}</td><td>${r.posts}</td>
+          <td>${r.views.toLocaleString()}</td>
+          <td style="color:#4ade80">${r.earning} ${r.currency}</td>
+          <td>${r.budget ? r.budget_used_pct + '%' : '—'}</td></tr>`).join('')}
+      </table>` : '<p class="hint">لا حملات بعد.</p>';
+
+    const posts = d.posts || [];
+    const pills = {accepted:'ok', paid:'ok', pending:'wait', rejected:'bad'};
+    $('postsList').innerHTML = posts.length ? `
+      <table class="dataTable">
+        <tr><th>#</th><th>المقطع</th><th>المنصة</th><th>مشاهدات</th><th>أرباح</th><th>الحالة</th></tr>
+        ${posts.map(p => `<tr>
+          <td>${p.id}</td><td>${esc(p.clip_key || '—')}</td><td>${esc(p.platform)}</td>
+          <td>${(p.views_count || 0).toLocaleString()}</td>
+          <td>${p.earning}</td>
+          <td><span class="pill ${pills[p.status] || ''}">${esc(p.status)}</span></td>
+        </tr>`).join('')}
+      </table>` : '';
+
+    const cams = await fetch('/api/campaigns').then(r => r.json());
+    $('postCampaign').innerHTML = '<option value="">(بلا حملة)</option>' +
+      (cams.campaigns || []).map(c => `<option>${esc(c.name)}</option>`).join('');
+  } catch (e) {}
+}
+
+$('camAdd').onclick = async () => {
+  const name = $('camName').value.trim();
+  if (!name) { banner('moneyBanner', 'err', 'اسم الحملة مطلوب.'); return; }
+  const r = await fetch('/api/campaigns', {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({
+      name, rate_per_1000_views: +$('camRate').value, budget: +$('camBudget').value,
+    }),
+  });
+  if (!r.ok) {
+    const e = await r.json();
+    banner('moneyBanner', 'err', e.detail || 'تعذّرت الإضافة.');
+    return;
+  }
+  banner('moneyBanner', 'ok', `أُضيفت الحملة «${name}».`);
+  $('camName').value = '';
+  loadMoney();
+};
+
+$('postAdd').onclick = async () => {
+  const clip = $('postClip').value.trim();
+  if (!clip) { banner('moneyBanner', 'err', 'معرّف المقطع مطلوب.'); return; }
+  const r = await fetch('/api/posts', {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({
+      clip_id: clip, platform: $('postPlatform').value,
+      views: +$('postViews').value, campaign: $('postCampaign').value,
+    }),
+  });
+  if (!r.ok) {
+    const e = await r.json();
+    banner('moneyBanner', 'err', e.detail || 'تعذّر التسجيل.');
+    return;
+  }
+  banner('moneyBanner', 'ok', 'سُجّل المنشور.');
+  loadMoney();
+};
 </script>
 </body>
 </html>

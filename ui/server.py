@@ -505,6 +505,176 @@ def get_file(path: str):
     return FileResponse(target)
 
 
+# ============================================================ المكتبة والحملات (المرحلتان 4 و5)
+
+
+@app.get("/api/library/videos")
+def api_library_videos(limit: int = 50) -> Dict[str, Any]:
+    from library.manager import list_videos
+
+    return {"videos": [v.to_dict() for v in list_videos(limit=limit)]}
+
+
+@app.get("/api/library/clips")
+def api_library_clips(video: str = "", campaign: str = "", limit: int = 100) -> Dict[str, Any]:
+    from library.manager import list_clips
+
+    return {"clips": list_clips(video_key=video, campaign=campaign, limit=limit)}
+
+
+@app.get("/api/library/search")
+def api_library_search(q: str, limit: int = 20, exact: bool = False) -> Dict[str, Any]:
+    from library.manager import search as lib_search
+
+    hits = lib_search(q, limit=limit, exact=exact)
+    return {"query": q, "count": len(hits), "hits": [h.to_dict() for h in hits]}
+
+
+@app.get("/api/library/stats")
+def api_library_stats() -> Dict[str, Any]:
+    from library.manager import stats as lib_stats
+
+    return lib_stats()
+
+
+@app.get("/api/queue")
+def api_queue_list(status: str = "") -> Dict[str, Any]:
+    from library.queue import list_items, summary
+
+    return {
+        "summary": summary(),
+        "items": [i.to_dict() for i in list_items(status=status)],
+    }
+
+
+class QueuePayload(BaseModel):
+    sources: List[str]
+    count: int = 3
+    preset: str = "campaign"
+    template: str = ""
+    face_track: bool = False
+    animated_subs: bool = False
+    license_key: str = "personal_test"
+
+
+@app.post("/api/queue")
+def api_queue_add(payload: QueuePayload) -> Dict[str, Any]:
+    from library.queue import enqueue
+
+    options = {
+        "count": payload.count, "preset": payload.preset,
+        "license": payload.license_key, "face_track": payload.face_track,
+        "animated_subs": payload.animated_subs,
+    }
+    if payload.template:
+        options["template"] = payload.template
+
+    ids = [enqueue(src, options=options) for src in payload.sources if src.strip()]
+    return {"added": len(ids), "ids": ids}
+
+
+@app.post("/api/queue/run")
+def api_queue_run() -> Dict[str, Any]:
+    """يشغّل الطابور في خيط خلفي ويرجع فوراً."""
+    from library.queue import run_queue, summary
+
+    pending = summary().get("pending", 0)
+    if not pending:
+        return {"started": False, "reason": "لا مهام معلّقة."}
+
+    def worker():
+        try:
+            run_queue()
+        except Exception as exc:  # pragma: no cover
+            log.error("فشل تشغيل الطابور: %s", exc)
+
+    threading.Thread(target=worker, daemon=True).start()
+    return {"started": True, "pending": pending}
+
+
+@app.post("/api/queue/{item_id}/cancel")
+def api_queue_cancel(item_id: int) -> Dict[str, Any]:
+    from library.queue import cancel
+
+    return {"cancelled": cancel(item_id)}
+
+
+@app.get("/api/campaigns")
+def api_campaigns() -> Dict[str, Any]:
+    from campaign.manager import list_campaigns
+
+    return {"campaigns": [c.to_dict() for c in list_campaigns()]}
+
+
+class CampaignPayload(BaseModel):
+    name: str
+    rate_per_1000_views: float
+    budget: float = 0.0
+    platform_link: str = ""
+    currency: str = "USD"
+    rules_notes: str = ""
+
+
+@app.post("/api/campaigns")
+def api_campaign_add(payload: CampaignPayload) -> Dict[str, Any]:
+    from campaign.manager import add_campaign
+
+    try:
+        campaign_id = add_campaign(
+            payload.name, rate_per_1000_views=payload.rate_per_1000_views,
+            budget=payload.budget, platform_link=payload.platform_link,
+            currency=payload.currency, rules_notes=payload.rules_notes,
+        )
+    except ArClipperError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return {"id": campaign_id}
+
+
+class PostPayload(BaseModel):
+    clip_id: str
+    platform: str
+    post_link: str = ""
+    views: int = 0
+    status: str = "pending"
+    campaign: str = ""
+
+
+@app.post("/api/posts")
+def api_post_add(payload: PostPayload) -> Dict[str, Any]:
+    from campaign.manager import add_post
+
+    try:
+        post_id = add_post(
+            payload.clip_id, platform=payload.platform, post_link=payload.post_link,
+            views=payload.views, status=payload.status, campaign=payload.campaign,
+        )
+    except ArClipperError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return {"id": post_id}
+
+
+@app.patch("/api/posts/{post_id}")
+def api_post_update(post_id: int, views: int = 0, status: str = "") -> Dict[str, Any]:
+    from campaign.manager import update_post
+
+    try:
+        ok = update_post(post_id, views=views or None, status=status or None)
+    except ArClipperError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return {"updated": ok}
+
+
+@app.get("/api/earnings")
+def api_earnings(accepted_only: bool = False) -> Dict[str, Any]:
+    from campaign.manager import earnings_report, list_posts, totals
+
+    return {
+        "rows": [r.to_dict() for r in earnings_report(only_accepted=accepted_only)],
+        "totals": totals(),
+        "posts": list_posts(),
+    }
+
+
 @app.get("/api/health")
 def health() -> Dict[str, str]:
     return {"status": "ok"}

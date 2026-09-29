@@ -777,3 +777,79 @@ class TestNewCommands:
         output = self._help("campaign", "--help")
         for sub in ("add", "list", "post", "views", "report", "ideas"):
             assert sub in output
+
+
+# ============================================================ واجهة الويب
+
+
+class TestWebEndpoints:
+    @pytest.fixture
+    @staticmethod
+    def client():
+        from fastapi.testclient import TestClient
+
+        from ui.server import app
+
+        return TestClient(app)
+
+    @pytest.mark.parametrize(
+        "path",
+        [
+            "/api/library/videos",
+            "/api/library/stats",
+            "/api/queue",
+            "/api/campaigns",
+            "/api/earnings",
+        ],
+    )
+    def test_endpoints_respond(self, client, path):
+        assert client.get(path).status_code == 200
+
+    def test_search_endpoint(self, client):
+        data = client.get("/api/library/search", params={"q": "أي-شيء"}).json()
+        assert "hits" in data and "count" in data
+
+    def test_campaign_validation_returns_400(self, client):
+        response = client.post(
+            "/api/campaigns", json={"name": "", "rate_per_1000_views": 1.0}
+        )
+        assert response.status_code == 400
+
+    def test_post_unknown_platform_returns_400(self, client):
+        response = client.post(
+            "/api/posts", json={"clip_id": "x", "platform": "myspace"}
+        )
+        assert response.status_code == 400
+
+    def test_queue_run_with_empty_queue(self, client):
+        data = client.post("/api/queue/run").json()
+        assert "started" in data
+
+
+class TestWebUiMarkup:
+    def _html(self):
+        return Path("ui/static/index.html").read_text(encoding="utf-8")
+
+    def test_all_tabs_present(self):
+        html = self._html()
+        for tab in ("tab-produce", "tab-library", "tab-queue", "tab-money"):
+            assert f'id="{tab}"' in html
+
+    def test_js_functions_defined(self):
+        html = self._html()
+        for fn in ("loadLibrary", "loadQueue", "loadMoney", "runSearch"):
+            assert f"function {fn}" in html
+
+    def test_html_is_escaped(self):
+        """بيانات المستخدم (العناوين، المصادر) تُحقن في DOM — لا بد من الهروب."""
+        html = self._html()
+        assert "const esc =" in html
+        assert "replace(/</g, '&lt;')" in html
+
+    def test_single_script_block(self):
+        html = self._html()
+        assert html.count("<script>") == html.count("</script>") == 1
+
+    def test_div_tags_balanced(self):
+        html = self._html()
+        assert html.count("<div") == html.count("</div>")
