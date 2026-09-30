@@ -1164,3 +1164,69 @@ class TestSpeakerAwareTracking:
         from core.pipeline import stage_render_clip
 
         assert "speaker_turns" in inspect.getsource(stage_render_clip)
+
+
+class TestThumbnailSubtitleAvoidance:
+    """نص المصغّرة كان يتراكب مع الترجمة المحروقة — رُصد بالفحص البصري."""
+
+    def test_pick_best_frame_accepts_avoid_ranges(self):
+        import inspect
+
+        from core.design.thumbnail import pick_best_frame
+
+        assert "avoid_ranges" in inspect.signature(pick_best_frame).parameters
+
+    def test_generate_thumbnail_accepts_avoid_ranges(self):
+        import inspect
+
+        from core.design.thumbnail import generate_thumbnail
+
+        assert "avoid_ranges" in inspect.signature(generate_thumbnail).parameters
+
+    def test_pipeline_passes_subtitle_ranges(self):
+        import inspect
+
+        from core.pipeline import stage_render_clip
+
+        source = inspect.getsource(stage_render_clip)
+        assert "subtitle_ranges" in source
+        assert "avoid_ranges=" in source
+
+    def test_ranges_only_when_burned(self):
+        """بلا حرق لا حاجة للتجنّب — الإطار كله نظيف."""
+        import inspect
+
+        from core.pipeline import stage_render_clip
+
+        assert '"burn" in stages' in inspect.getsource(stage_render_clip)
+
+    @pytest.mark.slow
+    def test_clean_frame_preferred_on_real_video(self, tmp_path):
+        """الإطار المختار يجب أن يقع خارج مدَيات الترجمة."""
+        pytest.importorskip("cv2")
+        from pathlib import Path
+
+        from core.design.thumbnail import pick_best_frame
+
+        sample = Path("data/samples/speaker.mp4")
+        if not sample.exists():
+            pytest.skip("العيّنة غير مولَّدة")
+
+        # امنع النصف الأول بالكامل
+        blocked = [(0.0, 15.0)]
+        picked = pick_best_frame(sample, avoid_ranges=blocked)
+        assert picked is not None
+        assert picked.time > 15.0, f"اختير إطار داخل المدى الممنوع: {picked.time}"
+
+    def test_falls_back_when_all_blocked(self):
+        """لو كانت كل اللحظات مغطاة بالترجمة، ننتج صورة لا نفشل."""
+        pytest.importorskip("cv2")
+        from pathlib import Path
+
+        from core.design.thumbnail import pick_best_frame
+
+        sample = Path("data/samples/speaker.mp4")
+        if not sample.exists():
+            pytest.skip("العيّنة غير مولَّدة")
+        picked = pick_best_frame(sample, avoid_ranges=[(0.0, 9999.0)])
+        assert picked is not None, "يجب التراجع لأفضل إطار متاح لا إرجاع None"

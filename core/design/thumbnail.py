@@ -17,7 +17,7 @@ from __future__ import annotations
 import unicodedata
 from dataclasses import dataclass
 from pathlib import Path
-from typing import List, Optional, Tuple
+from typing import List, Optional, Sequence, Tuple
 
 from ..common.config import Settings, load_settings
 from ..common.errors import MediaError
@@ -170,9 +170,18 @@ class FrameScore:
 
 
 def pick_best_frame(
-    video_path: str | Path, *, samples: int = 24, settings: Optional[Settings] = None
+    video_path: str | Path,
+    *,
+    samples: int = 24,
+    settings: Optional[Settings] = None,
+    avoid_ranges: Optional[Sequence[Tuple[float, float]]] = None,
 ) -> Optional[FrameScore]:
-    """يمسح عيّنات من الفيديو ويرجع تقييم أفضل إطار."""
+    """يمسح عيّنات من الفيديو ويرجع تقييم أفضل إطار.
+
+    ``avoid_ranges`` مدَيات زمنية يُفضَّل تجنّبها — تُستخدم لتفادي اللحظات
+    التي تظهر فيها ترجمة محروقة، وإلا تراكب نص الصورة المصغّرة معها فتبدو
+    فوضوية (رصدناه بصرياً في أول إنتاج كامل).
+    """
     try:
         import cv2
     except ImportError:
@@ -194,6 +203,12 @@ def pick_best_frame(
         )
         step = max(1, total // max(1, samples))
         best: Optional[FrameScore] = None
+        best_clean: Optional[FrameScore] = None
+
+        def _is_clean(moment: float) -> bool:
+            return not any(
+                start <= moment <= end for start, end in (avoid_ranges or [])
+            )
 
         # القراءة التسلسلية مع grab أسرع بكثير من البحث العشوائي (set POS_FRAMES)،
         # لأن الأخير يجبر فك ترميز من أقرب keyframe في كل مرة.
@@ -228,17 +243,29 @@ def pick_best_frame(
 
             if best is None or score.total > best.total:
                 best = score
+            # نحتفظ بأفضل إطار "نظيف" (بلا ترجمة ظاهرة) على حدة
+            if _is_clean(score.time) and (
+                best_clean is None or score.total > best_clean.total
+            ):
+                best_clean = score
     finally:
         capture.release()
 
-    if best:
+    # نفضّل الإطار النظيف ما لم يكن أضعف بكثير من الأفضل مطلقاً
+    chosen = best
+    if best_clean is not None and best is not None:
+        if best_clean is not best and best_clean.total >= best.total * 0.7:
+            chosen = best_clean
+            log.debug("اختير إطار خالٍ من الترجمة بدل الأعلى درجةً.")
+
+    if chosen:
         log.info(
             "أفضل إطار عند %.1fs (وجه %.1f%%، حدّة %.0f).",
-            best.time,
-            best.face_area * 100,
-            best.sharpness,
+            chosen.time,
+            chosen.face_area * 100,
+            chosen.sharpness,
         )
-    return best
+    return chosen
 
 
 # ============================================================ التوليد
@@ -253,8 +280,13 @@ def generate_thumbnail(
     at_time: Optional[float] = None,
     width: Optional[int] = None,
     height: Optional[int] = None,
+    avoid_ranges: Optional[Sequence[Tuple[float, float]]] = None,
 ) -> Path:
-    """ينتج صورة مصغّرة من أفضل إطار مع نص جذاب فوقه."""
+    """ينتج صورة مصغّرة من أفضل إطار مع نص جذاب فوقه.
+
+    ``avoid_ranges`` = مدَيات الترجمة المحروقة، فيُختار إطار خالٍ منها ولا
+    يتراكب نص المصغّرة مع ترجمة الفيديو.
+    """
     settings = settings or load_settings()
     try:
         import cv2
@@ -267,7 +299,9 @@ def generate_thumbnail(
 
     timestamp = at_time
     if timestamp is None:
-        best = pick_best_frame(video_path, settings=settings)
+        best = pick_best_frame(
+            video_path, settings=settings, avoid_ranges=avoid_ranges
+        )
         timestamp = best.time if best else 0.0
 
     capture = cv2.VideoCapture(str(video_path))

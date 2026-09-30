@@ -398,11 +398,21 @@ def stage_render_clip(
     if options.thumbnail and settings.get("thumbnail.enabled", True):
         try:
             hook_text = request.hook or request.title or ""
+            # الترجمة المحروقة تتراكب مع نص المصغّرة — نمرّر مدَياتها
+            # ليُختار إطار خالٍ منها
+            subtitle_ranges = []
+            if "burn" in stages and clip_transcript is not None:
+                subtitle_ranges = [
+                    (float(seg.start), float(seg.end))
+                    for seg in clip_transcript.segments
+                ]
+
             thumb = generate_thumbnail(
                 result.video_path,
                 Path(result.video_path).with_suffix(".jpg"),
                 text=hook_text,
                 settings=settings,
+                avoid_ranges=subtitle_ranges or None,
             )
             result.thumbnail_path = str(thumb)
             stages.append("thumbnail")
